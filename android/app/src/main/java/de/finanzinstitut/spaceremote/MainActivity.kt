@@ -180,7 +180,7 @@ class MainActivity : ComponentActivity() {
                     client = c
                     remoteView.client = c
                     screen = Screen.REMOTE
-                    setImmersive(true)
+                    applyImmersive(true)
                     return@launch
                 } catch (e: CancellationException) {
                     c.close()
@@ -219,7 +219,7 @@ class MainActivity : ComponentActivity() {
         remoteView.client = null
         c?.close()
         remoteView.hideKeyboard()
-        setImmersive(false)
+        applyImmersive(false)
         message = msg
         screen = if (prefs.isConfigured) Screen.HOME else Screen.SETTINGS
     }
@@ -244,7 +244,7 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun setImmersive(on: Boolean) {
+    private fun applyImmersive(on: Boolean) {
         val ctrl = WindowCompat.getInsetsController(window, window.decorView)
         if (on) {
             ctrl.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
