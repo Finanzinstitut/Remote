@@ -1,47 +1,75 @@
-# PCRemote
+# PCRemote V2
 
-Open-source starter project for controlling a Windows PC from Android over a local network.
+Windows + Android remote-control project.
 
-## What it does
+## Features
+- Wake-on-LAN button
+- Automatic LAN discovery of running PCRemote hosts
+- MJPEG-style continuous screen stream (much smoother than repeated single screenshots)
+- Fullscreen remote view
+- Touch mouse: move, left click, right click, drag
+- Scroll gestures
+- Text/keyboard input
+- Random authentication token
+- Works through Tailscale/VPN when the PC is online
+- Designed so the Windows host can start with Windows
 
-1. Android sends **Wake-on-LAN** to wake the PC.
-2. The Windows host starts automatically with Windows.
-3. Android connects to the Windows host.
-4. The host sends periodic JPEG screenshots.
-5. Touches on the Android screen are translated into Windows mouse actions.
-6. A small text box can send keyboard text.
+## Important
+Wake-on-LAN is a Layer-2 LAN feature. A phone outside your home network cannot normally wake a completely powered-off PC through Tailscale alone. For remote wake, use a device in the home LAN that can send WoL (router/NAS/another always-on computer) or configure your router for WoL.
 
-> Important: a phone cannot receive a live picture from a PC while the PC is completely powered off. Wake-on-LAN wakes the PC first; the live screen starts as soon as the Windows host is running.
+Do NOT port-forward port 8765 directly to the Internet.
 
-## Security
+## Build Windows host
 
-This prototype is intended for a trusted LAN. It uses a random token in every request. **Do not expose the HTTP port directly to the Internet.** For remote access from outside your home, use a VPN such as Tailscale/WireGuard or add a properly configured TLS/reverse proxy.
+Install the .NET SDK. Then in PowerShell:
 
-## Windows requirements
+```powershell
+cd windows/PCRemote.Host
+dotnet build -c Release
+dotnet run
+```
 
-- Windows 10/11
-- .NET 8 SDK
-- Enable Wake-on-LAN in BIOS/UEFI and the network adapter if you want the wake button.
-- Build:
-  `dotnet build windows/PCRemote.Host/PCRemote.Host.csproj -c Release`
+The host prints its token and LAN addresses.
 
-Run:
-`dotnet run --project windows/PCRemote.Host`
+To publish a self-contained EXE:
 
-Set the host URL and token shown by the Windows program in the Android app.
+```powershell
+dotnet publish -c Release -r win-x64 --self-contained true /p:PublishSingleFile=true
+```
 
-## Android requirements
+The EXE will be under `bin/Release/net8.0-windows/win-x64/publish/`.
 
-- Android Studio
-- Android 8+
-- Kotlin/Java support through Gradle
-- Build with Android Studio or Gradle.
+## Windows Firewall
 
-The Android side uses the Windows host's `/screen` endpoint for JPEG frames and `/mouse` + `/key` for control.
+Allow the app/port on your private network. Run PowerShell as administrator:
 
-## Limitations of this starter
+```powershell
+New-NetFirewallRule -DisplayName "PCRemote 8765" -Direction Inbound -Protocol TCP -LocalPort 8765 -Action Allow -Profile Private
+```
 
-- Screenshot streaming is intentionally simple and not as efficient as RDP/WebRTC.
-- It is LAN-oriented.
-- It does not yet implement clipboard synchronization, audio, file transfer, multi-monitor selection, or hardware-accelerated video.
-- Windows coordinate mapping assumes the screenshot dimensions match the desktop coordinate space.
+## Start with Windows
+
+After publishing the EXE, create a shortcut to it and place the shortcut in:
+
+```text
+shell:startup
+```
+
+For a production app, replace this with a proper Windows service/tray app.
+
+## Android
+
+Open the `android` folder in Android Studio and let Gradle sync. Android Studio is the official IDE for Android development.
+
+Connect the phone by USB with Developer Options + USB debugging enabled, then Run.
+
+Enter the Windows PC's LAN/Tailscale IP and the token. The Discover button can find running hosts on the same LAN.
+
+## Tailscale
+
+Install Tailscale on both devices and sign into the same tailnet. Use the PC's Tailscale 100.x address in the app when the PC is running.
+
+This gives encrypted private networking without exposing port 8765 to the Internet.
+
+## Production roadmap
+For a polished TeamViewer-like application, the next major step is WebRTC/H.264 hardware encoding, clipboard/file transfer, multi-monitor selection, audio, input-method keyboard support, pairing QR codes, and a real Windows tray/service architecture.
