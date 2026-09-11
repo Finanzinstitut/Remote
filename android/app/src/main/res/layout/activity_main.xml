@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="vertical" android:padding="8dp"
+    android:layout_width="match_parent" android:layout_height="match_parent">
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+        <Button android:id="@+id/discover" android:text="PC suchen" android:layout_weight="1"
+            android:layout_width="0dp" android:layout_height="wrap_content"/>
+        <Button android:id="@+id/wake" android:text="PC einschalten" android:layout_weight="1"
+            android:layout_width="0dp" android:layout_height="wrap_content"/>
+    </LinearLayout>
+
+    <EditText android:id="@+id/host" android:hint="PC IP / Tailscale IP"
+        android:layout_width="match_parent" android:layout_height="wrap_content"/>
+    <EditText android:id="@+id/token" android:hint="Token" android:inputType="textPassword"
+        android:layout_width="match_parent" android:layout_height="wrap_content"/>
+    <EditText android:id="@+id/mac" android:hint="MAC für Wake-on-LAN"
+        android:layout_width="match_parent" android:layout_height="wrap_content"/>
+
+    <Button android:id="@+id/connect" android:text="Verbinden / Vollbild"
+        android:layout_width="match_parent" android:layout_height="wrap_content"/>
+
+    <ImageView android:id="@+id/screen" android:background="#000000"
+        android:scaleType="fitCenter" android:layout_width="match_parent"
+        android:layout_height="0dp" android:layout_weight="1"/>
+
+    <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content">
+        <Button android:id="@+id/right" android:text="Rechtsklick"
+            android:layout_weight="1" android:layout_width="0dp" android:layout_height="wrap_content"/>
+        <Button android:id="@+id/keyboard" android:text="Tastatur"
+            android:layout_weight="1" android:layout_width="0dp" android:layout_height="wrap_content"/>
+        <Button android:id="@+id/exit" android:text="Beenden"
+            android:layout_weight="1" android:layout_width="0dp" android:layout_height="wrap_content"/>
+    </LinearLayout>
+</LinearLayout>
