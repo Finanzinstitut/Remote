@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>disable</Nullable>
+    <AssemblyName>SpaceRemote</AssemblyName>
+    <RootNamespace>SpaceRemote</RootNamespace>
+    <Version>1.0.0</Version>
+    <Company>Finanzinstitut</Company>
+    <Product>Space Remote</Product>
+    <SatelliteResourceLanguages>de;en</SatelliteResourceLanguages>
+    <DebugType>none</DebugType>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,14 @@
+# .NET
+bin/
+obj/
+out/
+*.user
+.vs/
+# Android / Gradle
+.gradle/
+build/
+local.properties
+*.iml
+.idea/
+*.apk
+*.keystore
