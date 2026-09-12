@@ -10,7 +10,7 @@ static class InputSim
     const uint MOUSEEVENTF_MOVE = 0x0001, MOUSEEVENTF_LEFTDOWN = 0x0002, MOUSEEVENTF_LEFTUP = 0x0004,
                MOUSEEVENTF_RIGHTDOWN = 0x0008, MOUSEEVENTF_RIGHTUP = 0x0010,
                MOUSEEVENTF_MIDDLEDOWN = 0x0020, MOUSEEVENTF_MIDDLEUP = 0x0040,
-               MOUSEEVENTF_WHEEL = 0x0800, MOUSEEVENTF_ABSOLUTE = 0x8000;
+               MOUSEEVENTF_WHEEL = 0x0800, MOUSEEVENTF_HWHEEL = 0x1000, MOUSEEVENTF_ABSOLUTE = 0x8000;
 
     const uint KEYEVENTF_EXTENDEDKEY = 0x0001, KEYEVENTF_KEYUP = 0x0002, KEYEVENTF_UNICODE = 0x0004;
 
@@ -57,6 +57,17 @@ static class InputSim
         Send(Mouse(x, y, 0, MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE));
     }
 
+    /// <summary>Trackpad-style movement: deltas arrive as a fraction of the screen size.</summary>
+    public static void MoveRelative(float ndx, float ndy)
+    {
+        if (float.IsNaN(ndx) || float.IsNaN(ndy)) return;
+        var b = Screen.PrimaryScreen.Bounds;
+        int dx = (int)Math.Round(Math.Clamp(ndx, -1f, 1f) * b.Width);
+        int dy = (int)Math.Round(Math.Clamp(ndy, -1f, 1f) * b.Height);
+        if (dx == 0 && dy == 0) return;
+        Send(Mouse(dx, dy, 0, MOUSEEVENTF_MOVE));
+    }
+
     public static void Button(int button, bool down)
     {
         uint flags = button switch
@@ -69,6 +80,8 @@ static class InputSim
     }
 
     public static void Scroll(int delta) => Send(Mouse(0, 0, unchecked((uint)delta), MOUSEEVENTF_WHEEL));
+
+    public static void HScroll(int delta) => Send(Mouse(0, 0, unchecked((uint)delta), MOUSEEVENTF_HWHEEL));
 
     static bool IsExtended(ushort vk) =>
         (vk >= 0x21 && vk <= 0x28) || vk == 0x2D || vk == 0x2E || vk == 0x5B || vk == 0x5C || vk == 0x5D || vk == 0x6F;

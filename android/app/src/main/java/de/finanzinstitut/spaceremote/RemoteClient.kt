@@ -132,6 +132,8 @@ class RemoteClient(
 
     fun move(x: Float, y: Float) = send { writeByte(1); writeFloat(x); writeFloat(y) }
 
+    fun moveRel(dx: Float, dy: Float) = send { writeByte(7); writeFloat(dx); writeFloat(dy) }
+
     fun button(button: Int, down: Boolean) = send { writeByte(2); writeByte(button); writeByte(if (down) 1 else 0) }
 
     fun click(button: Int) = send {
@@ -140,6 +142,8 @@ class RemoteClient(
     }
 
     fun scroll(delta: Int) = send { writeByte(3); writeInt(delta) }
+
+    fun hScroll(delta: Int) = send { writeByte(8); writeInt(delta) }
 
     fun text(t: String) {
         val bytes = t.toByteArray(Charsets.UTF_8)

@@ -19,6 +19,8 @@ namespace SpaceRemote;
  *     4 Text    uint16 length, UTF-8
  *     5 Key     byte mods (1 Ctrl, 2 Alt, 4 Shift, 8 Win), uint16 VK
  *     6 Power   byte (0 shut down, 1 restart, 2 sleep, 3 lock)
+ *     7 MoveRel float dx, float dy (fraction of screen size, trackpad mode)
+ *     8 HScroll int32 delta
  */
 sealed class RemoteServer
 {
@@ -237,6 +239,15 @@ sealed class Session
                 case 6:
                     stream.ReadExactly(buf, 0, 1);
                     Power.Do(buf[0]);
+                    break;
+                case 7:
+                    stream.ReadExactly(buf, 0, 8);
+                    InputSim.MoveRelative(BinaryPrimitives.ReadSingleBigEndian(buf.AsSpan(0, 4)),
+                                          BinaryPrimitives.ReadSingleBigEndian(buf.AsSpan(4, 4)));
+                    break;
+                case 8:
+                    stream.ReadExactly(buf, 0, 4);
+                    InputSim.HScroll(BinaryPrimitives.ReadInt32BigEndian(buf.AsSpan(0, 4)));
                     break;
                 default:
                     return; // unknown packet -> drop the connection

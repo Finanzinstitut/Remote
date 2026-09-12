@@ -8,29 +8,39 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.RectF
 import android.os.SystemClock
-import android.text.InputType
 import android.view.HapticFeedbackConstants
-import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
-import android.view.inputmethod.BaseInputConnection
-import android.view.inputmethod.EditorInfo
-import android.view.inputmethod.InputConnection
-import android.view.inputmethod.InputMethodManager
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
+import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.min
 
 /**
- * Shows the PC screen and turns touch into mouse input:
- *  tap = left click, double tap = double click, long press = right click,
- *  drag = drag with the button held, two fingers = scroll.
+ * Shows the PC screen and turns touch into mouse input.
+ *
+ * Trackpad mode (default): the finger moves the cursor relatively, like a laptop
+ * touchpad. Tap = left click, two-finger tap = right click, two fingers = scroll.
+ *
+ * Direct mode: the cursor jumps to wherever you touch. Handy for precise clicking,
+ * awkward for dragging.
  */
 class RemoteView(context: Context) : View(context) {
 
     @Volatile var client: RemoteClient? = null
+
+    /** true = touchpad-style relative movement, false = cursor jumps to the touch point. */
+    var trackpad = true
+        set(value) {
+            field = value
+            releaseButton()
+        }
+
+    /** Cursor speed in trackpad mode. */
+    var sensitivity = 1.7f
+
+    /** Scroll speed multiplier. */
+    var scrollSpeed = 1.0f
 
     @Volatile var lastFrameAt = 0L
         private set
@@ -38,25 +48,33 @@ class RemoteView(context: Context) : View(context) {
     private var bitmap: Bitmap? = null
     private val dst = RectF()
     private val paint = Paint(Paint.FILTER_BITMAP_FLAG or Paint.ANTI_ALIAS_FLAG)
+    private val density = resources.displayMetrics.density
     private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
     private val longPressMs = ViewConfiguration.getLongPressTimeout().toLong()
-    private val scrollStepPx = 24f * resources.displayMetrics.density
+
+    /** One wheel notch per this many pixels of finger travel. Small = scrolls easily. */
+    private val scrollStepPx = 9f * density
 
     private var downX = 0f
     private var downY = 0f
+    private var lastX = 0f
+    private var lastY = 0f
+    private var downTime = 0L
+    private var moved = false
     private var dragging = false
     private var longPressed = false
-    private var multiTouch = false
+    private var gestureFingers = 1
+    private var scrolling = false
     private var lastScrollY = 0f
-    private var scrollAcc = 0f
-    private var lastTapTime = 0L
+    private var lastScrollX = 0f
+    private var scrollAccY = 0f
+    private var scrollAccX = 0f
+    private var lastTapUp = 0L
     private var lastTapX = 0f
     private var lastTapY = 0f
-    private var composing = ""
 
     init {
-        isFocusable = true
-        isFocusableInTouchMode = true
+        isFocusable = false
         keepScreenOn = true
         setBackgroundColor(Color.BLACK)
     }
@@ -76,6 +94,14 @@ class RemoteView(context: Context) : View(context) {
         invalidate()
     }
 
+    private fun releaseButton() {
+        if (dragging) {
+            client?.button(0, false)
+            dragging = false
+        }
+        removeCallbacks(longPressRunnable)
+    }
+
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         val b = bitmap ?: return
@@ -89,95 +115,145 @@ class RemoteView(context: Context) : View(context) {
     private fun nx(x: Float) = if (dst.width() > 0f) ((x - dst.left) / dst.width()).coerceIn(0f, 1f) else 0.5f
     private fun ny(y: Float) = if (dst.height() > 0f) ((y - dst.top) / dst.height()).coerceIn(0f, 1f) else 0.5f
 
+    /** Holding still starts a drag: the button goes down and stays down until you lift off. */
     private val longPressRunnable = Runnable {
-        if (!dragging && !multiTouch) {
-            longPressed = true
-            client?.let { c ->
-                c.move(nx(downX), ny(downY))
-                c.click(1)
-            }
-            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
-        }
+        if (scrolling || dragging) return@Runnable
+        longPressed = true
+        val c = client ?: return@Runnable
+        if (!trackpad) c.move(nx(downX), ny(downY))
+        c.button(0, true)
+        dragging = true
+        performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
     }
 
     @SuppressLint("ClickableViewAccessibility")
     override fun onTouchEvent(e: MotionEvent): Boolean {
         val c = client ?: return true
+
         when (e.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 downX = e.x
                 downY = e.y
-                dragging = false
+                lastX = e.x
+                lastY = e.y
+                downTime = SystemClock.elapsedRealtime()
+                moved = false
                 longPressed = false
-                multiTouch = false
+                scrolling = false
+                gestureFingers = 1
                 postDelayed(longPressRunnable, longPressMs)
             }
 
             MotionEvent.ACTION_POINTER_DOWN -> {
+                gestureFingers = maxOf(gestureFingers, e.pointerCount)
                 removeCallbacks(longPressRunnable)
                 if (dragging) {
                     c.button(0, false)
                     dragging = false
                 }
-                multiTouch = true
+                scrolling = true
                 lastScrollY = avgY(e)
-                scrollAcc = 0f
+                lastScrollX = avgX(e)
+                scrollAccY = 0f
+                scrollAccX = 0f
             }
 
             MotionEvent.ACTION_MOVE -> {
-                if (multiTouch) {
+                if (scrolling) {
                     if (e.pointerCount >= 2) {
                         val y = avgY(e)
-                        scrollAcc += y - lastScrollY
+                        val x = avgX(e)
+                        scrollAccY += (y - lastScrollY) * scrollSpeed
+                        scrollAccX += (x - lastScrollX) * scrollSpeed
                         lastScrollY = y
-                        val notches = (scrollAcc / scrollStepPx).toInt()
-                        if (notches != 0) {
-                            c.scroll(notches * 120)
-                            scrollAcc -= notches * scrollStepPx
+                        lastScrollX = x
+
+                        val notchesY = (scrollAccY / scrollStepPx).toInt()
+                        if (notchesY != 0) {
+                            c.scroll(notchesY * 120)
+                            scrollAccY -= notchesY * scrollStepPx
+                        }
+                        // sideways two-finger swipe scrolls horizontally (Shift+wheel)
+                        val notchesX = (scrollAccX / scrollStepPx).toInt()
+                        if (notchesX != 0 && abs(scrollAccX) > abs(scrollAccY)) {
+                            c.hScroll(-notchesX * 120)
+                            scrollAccX -= notchesX * scrollStepPx
                         }
                     }
-                } else if (!longPressed) {
-                    if (!dragging && hypot(e.x - downX, e.y - downY) > touchSlop) {
-                        removeCallbacks(longPressRunnable)
-                        dragging = true
-                        c.move(nx(downX), ny(downY))
-                        c.button(0, true)
+                } else {
+                    if (!moved && hypot(e.x - downX, e.y - downY) > touchSlop) {
+                        moved = true
+                        if (!longPressed) removeCallbacks(longPressRunnable)
                     }
-                    if (dragging) c.move(nx(e.x), ny(e.y))
+                    if (moved) {
+                        if (trackpad) {
+                            val dx = e.x - lastX
+                            val dy = e.y - lastY
+                            // gentle acceleration: slow finger = precise, fast finger = across the screen
+                            val speed = hypot(dx, dy) / density
+                            val gain = sensitivity * (0.55f + min(speed / 22f, 1.6f))
+                            if (dst.width() > 0f && dst.height() > 0f) {
+                                c.moveRel(dx * gain / dst.width(), dy * gain / dst.height())
+                            }
+                        } else {
+                            c.move(nx(e.x), ny(e.y))
+                        }
+                        lastX = e.x
+                        lastY = e.y
+                    }
                 }
             }
 
             MotionEvent.ACTION_POINTER_UP -> {
                 lastScrollY = avgY(e, excludeIndex = e.actionIndex)
+                lastScrollX = avgX(e, excludeIndex = e.actionIndex)
             }
 
             MotionEvent.ACTION_UP -> {
                 removeCallbacks(longPressRunnable)
-                if (dragging) {
-                    c.move(nx(e.x), ny(e.y))
-                    c.button(0, false)
-                } else if (!longPressed && !multiTouch) {
-                    var tx = e.x
-                    var ty = e.y
-                    val now = SystemClock.elapsedRealtime()
-                    // double tap: reuse the same position so Windows recognises a double click
-                    if (now - lastTapTime < 400 && hypot(tx - lastTapX, ty - lastTapY) < touchSlop * 2) {
-                        tx = lastTapX
-                        ty = lastTapY
+                val heldMs = SystemClock.elapsedRealtime() - downTime
+
+                when {
+                    dragging -> {
+                        c.button(0, false)
+                        dragging = false
                     }
-                    lastTapTime = now
-                    lastTapX = tx
-                    lastTapY = ty
-                    c.move(nx(tx), ny(ty))
-                    c.click(0)
+
+                    // two-finger tap = right click
+                    scrolling && gestureFingers >= 2 && !moved && heldMs < 300 &&
+                        abs(scrollAccY) < scrollStepPx && abs(scrollAccX) < scrollStepPx -> {
+                        c.click(1)
+                        performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                    }
+
+                    !scrolling && !moved && !longPressed && heldMs < 400 -> {
+                        val now = SystemClock.elapsedRealtime()
+                        val isDouble = now - lastTapUp < 380 &&
+                            hypot(e.x - lastTapX, e.y - lastTapY) < touchSlop * 3
+                        if (!trackpad) {
+                            // in direct mode keep the exact spot so Windows sees a real double click
+                            val tx = if (isDouble) lastTapX else e.x
+                            val ty = if (isDouble) lastTapY else e.y
+                            c.move(nx(tx), ny(ty))
+                            lastTapX = tx
+                            lastTapY = ty
+                        } else {
+                            lastTapX = e.x
+                            lastTapY = e.y
+                        }
+                        lastTapUp = now
+                        c.click(0)
+                    }
                 }
-                dragging = false
+                scrolling = false
+                gestureFingers = 1
             }
 
             MotionEvent.ACTION_CANCEL -> {
                 removeCallbacks(longPressRunnable)
                 if (dragging) c.button(0, false)
                 dragging = false
+                scrolling = false
             }
         }
         return true
@@ -186,120 +262,14 @@ class RemoteView(context: Context) : View(context) {
     private fun avgY(e: MotionEvent, excludeIndex: Int = -1): Float {
         var sum = 0f
         var n = 0
-        for (i in 0 until e.pointerCount) {
-            if (i != excludeIndex) {
-                sum += e.getY(i)
-                n++
-            }
-        }
+        for (i in 0 until e.pointerCount) if (i != excludeIndex) { sum += e.getY(i); n++ }
         return if (n > 0) sum / n else 0f
     }
 
-    // ---------------- keyboard ----------------
-
-    fun toggleKeyboard() {
-        val visible = ViewCompat.getRootWindowInsets(this)?.isVisible(WindowInsetsCompat.Type.ime()) == true
-        if (visible) hideKeyboard() else showKeyboard()
-    }
-
-    fun showKeyboard() {
-        requestFocus()
-        val imm = context.getSystemService(InputMethodManager::class.java) ?: return
-        imm.restartInput(this)
-        imm.showSoftInput(this, 0)
-    }
-
-    fun hideKeyboard() {
-        composing = ""
-        val imm = context.getSystemService(InputMethodManager::class.java) ?: return
-        imm.hideSoftInputFromWindow(windowToken, 0)
-    }
-
-    override fun onCheckIsTextEditor(): Boolean = true
-
-    override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
-        // "visible password" = no autocorrect or suggestions -> characters arrive as typed
-        outAttrs.inputType = InputType.TYPE_CLASS_TEXT or
-            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
-            InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-        outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_EXTRACT_UI or
-            EditorInfo.IME_FLAG_NO_FULLSCREEN or
-            EditorInfo.IME_ACTION_NONE
-        composing = ""
-
-        return object : BaseInputConnection(this, false) {
-            override fun commitText(text: CharSequence?, newCursorPosition: Int): Boolean {
-                applyComposing(text?.toString() ?: "")
-                composing = ""
-                return true
-            }
-
-            override fun setComposingText(text: CharSequence?, newCursorPosition: Int): Boolean {
-                applyComposing(text?.toString() ?: "")
-                return true
-            }
-
-            override fun finishComposingText(): Boolean {
-                composing = ""
-                return true
-            }
-
-            override fun deleteSurroundingText(beforeLength: Int, afterLength: Int): Boolean {
-                repeat(beforeLength.coerceIn(0, 64)) { client?.key(Vk.BACK) }
-                repeat(afterLength.coerceIn(0, 64)) { client?.key(Vk.DELETE) }
-                return true
-            }
-
-            override fun sendKeyEvent(event: KeyEvent): Boolean {
-                if (event.action == KeyEvent.ACTION_DOWN) handleKey(event)
-                return true
-            }
-
-            override fun performEditorAction(actionCode: Int): Boolean {
-                client?.key(Vk.RETURN)
-                return true
-            }
-        }
-    }
-
-    /** Sends only what changed compared to the previous composing text. */
-    private fun applyComposing(new: String) {
-        val c = client ?: return
-        var p = 0
-        while (p < composing.length && p < new.length && composing[p] == new[p]) p++
-        repeat(composing.length - p) { c.key(Vk.BACK) }
-        if (new.length > p) c.text(new.substring(p))
-        composing = new
-    }
-
-    private fun handleKey(event: KeyEvent): Boolean {
-        val c = client ?: return false
-        val vk = when (event.keyCode) {
-            KeyEvent.KEYCODE_DEL -> Vk.BACK
-            KeyEvent.KEYCODE_FORWARD_DEL -> Vk.DELETE
-            KeyEvent.KEYCODE_ENTER, KeyEvent.KEYCODE_NUMPAD_ENTER -> Vk.RETURN
-            KeyEvent.KEYCODE_TAB -> Vk.TAB
-            KeyEvent.KEYCODE_ESCAPE -> Vk.ESCAPE
-            KeyEvent.KEYCODE_DPAD_LEFT -> Vk.LEFT
-            KeyEvent.KEYCODE_DPAD_UP -> Vk.UP
-            KeyEvent.KEYCODE_DPAD_RIGHT -> Vk.RIGHT
-            KeyEvent.KEYCODE_DPAD_DOWN -> Vk.DOWN
-            else -> 0
-        }
-        if (vk != 0) {
-            c.key(vk)
-            return true
-        }
-        val ch = event.unicodeChar
-        if (ch > 0 && !Character.isISOControl(ch)) {
-            c.text(String(Character.toChars(ch)))
-            return true
-        }
-        return false
-    }
-
-    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
-        if (keyCode == KeyEvent.KEYCODE_BACK) return super.onKeyDown(keyCode, event)
-        return handleKey(event) || super.onKeyDown(keyCode, event)
+    private fun avgX(e: MotionEvent, excludeIndex: Int = -1): Float {
+        var sum = 0f
+        var n = 0
+        for (i in 0 until e.pointerCount) if (i != excludeIndex) { sum += e.getX(i); n++ }
+        return if (n > 0) sum / n else 0f
     }
 }

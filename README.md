@@ -83,17 +83,35 @@ Tip: give the PC a fixed IP in your router so the address never changes.
 
 ## Controls
 
+The screen behaves like a laptop touchpad by default: your finger moves the cursor relatively, so you can lift and reposition without the pointer jumping.
+
 | Gesture | Action |
 |---|---|
+| Move one finger | Move the cursor |
 | Tap | Left click |
 | Double tap | Double click |
-| Long press | Right click |
-| Drag | Drag with the button held (move windows, select) |
+| Two-finger tap | Right click |
+| Hold still, then move | Drag with the button held |
 | Two fingers up/down | Scroll |
-| ⌨ | Show/hide the phone keyboard |
-| Fn | Special keys (Esc, Win, Alt+Tab, Ctrl+C/V, arrows …) |
+| Two fingers left/right | Scroll sideways |
+
+Toolbar buttons:
+
+| Button | Meaning |
+|---|---|
+| ⌨ | Show the built-in QWERTZ keyboard |
+| ◍ / ✛ | Switch between touchpad mode and direct touch (cursor jumps to your finger) |
+| Fn | Shortcut bar (Alt+Tab, Ctrl+C/V, F5, F11 …) |
 | ⏻ | Shut down, restart, sleep, lock |
 | ✕ | Disconnect |
+
+### The keyboard
+
+⌨ opens a real Windows keyboard inside the app, not the Android one. German QWERTZ layout with umlauts, and Ctrl, Alt, Win, Shift and Caps Lock that behave like physical keys.
+
+- Tap **Ctrl**, then **C** → Ctrl+C. The modifier arms itself for one key and turns blue.
+- Tap it **twice** → it locks (turns green) and stays down until you tap it a third time. Useful for things like Ctrl+Shift+Esc.
+- **Caps** and **Shift** both switch the letters; Caps inverts what Shift does, same as on a real keyboard.
 
 ## Tuning
 

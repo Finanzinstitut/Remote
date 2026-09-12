@@ -269,7 +269,6 @@ class MainActivity : ComponentActivity() {
         client = null
         remoteView.client = null
         c?.close()
-        remoteView.hideKeyboard()
         applyImmersive(false)
         message = msg
         screen = if (prefs.isConfigured) Screen.HOME else Screen.SETTINGS
@@ -673,9 +672,12 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun RemoteScreen() {
+        var showKeyboard by remember { mutableStateOf(false) }
         var showKeys by remember { mutableStateOf(false) }
         var showPower by remember { mutableStateOf(false) }
         var confirmLeave by remember { mutableStateOf(false) }
+        var trackpad by remember { mutableStateOf(remoteView.trackpad) }
+        var modeHint by remember { mutableStateOf<String?>(null) }
         var stale by remember { mutableStateOf(false) }
 
         LaunchedEffect(Unit) {
@@ -684,25 +686,56 @@ class MainActivity : ComponentActivity() {
                 stale = hasFrame && SystemClock.elapsedRealtime() - remoteView.lastFrameAt > 4000
             }
         }
-        BackHandler { confirmLeave = true }
+        LaunchedEffect(modeHint) {
+            if (modeHint != null) {
+                delay(1800)
+                modeHint = null
+            }
+        }
+        BackHandler {
+            when {
+                showKeyboard -> showKeyboard = false
+                showKeys -> showKeys = false
+                else -> confirmLeave = true
+            }
+        }
+
+        val toggleTrackpad = {
+            trackpad = !trackpad
+            remoteView.trackpad = trackpad
+            modeHint = if (trackpad) "Touchpad mode" else "Direct touch mode"
+        }
 
         BoxWithConstraints(
             Modifier
                 .fillMaxSize()
                 .background(Color.Black)
                 .displayCutoutPadding()
-                .imePadding()
         ) {
             val landscape = maxWidth > maxHeight
-            if (landscape) {
-                Row(Modifier.fillMaxSize()) {
-                    StreamArea(Modifier.weight(1f).fillMaxHeight(), showKeys, stale)
-                    ToolBar(true, { showKeys = !showKeys }, { showPower = true }, { confirmLeave = true })
+            Column(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxWidth()) {
+                    if (landscape) {
+                        Row(Modifier.fillMaxSize()) {
+                            StreamArea(Modifier.weight(1f).fillMaxHeight(), showKeys, stale, modeHint)
+                            ToolBar(true, trackpad, { showKeyboard = !showKeyboard }, toggleTrackpad,
+                                { showKeys = !showKeys }, { showPower = true }, { confirmLeave = true })
+                        }
+                    } else {
+                        Column(Modifier.fillMaxSize()) {
+                            StreamArea(Modifier.weight(1f).fillMaxWidth(), showKeys, stale, modeHint)
+                            ToolBar(false, trackpad, { showKeyboard = !showKeyboard }, toggleTrackpad,
+                                { showKeys = !showKeys }, { showPower = true }, { confirmLeave = true })
+                        }
+                    }
                 }
-            } else {
-                Column(Modifier.fillMaxSize()) {
-                    StreamArea(Modifier.weight(1f).fillMaxWidth(), showKeys, stale)
-                    ToolBar(false, { showKeys = !showKeys }, { showPower = true }, { confirmLeave = true })
+
+                AnimatedVisibility(
+                    visible = showKeyboard,
+                    enter = fadeIn(tween(160)) + slideInVertically(tween(240)) { it },
+                    exit = fadeOut(tween(120)) + slideOutVertically(tween(200)) { it },
+                ) {
+                    WindowsKeyboard(client)
                 }
             }
         }
@@ -739,7 +772,7 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun StreamArea(modifier: Modifier, showKeys: Boolean, stale: Boolean) {
+    private fun StreamArea(modifier: Modifier, showKeys: Boolean, stale: Boolean, modeHint: String?) {
         Box(modifier) {
             // the first frame fades in instead of snapping into place
             val alpha by animateFloatAsState(if (hasFrame) 1f else 0f, tween(420), label = "frame")
@@ -761,6 +794,22 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(16.dp))
                     Text("Waiting for the first frame…", color = Muted, fontSize = 14.sp)
                 }
+            }
+
+            AnimatedVisibility(
+                visible = modeHint != null,
+                enter = fadeIn(tween(150)),
+                exit = fadeOut(tween(400)),
+                modifier = Modifier.align(Alignment.Center),
+            ) {
+                Text(
+                    modeHint ?: "",
+                    color = Color.White,
+                    fontSize = 15.sp,
+                    modifier = Modifier
+                        .background(Color(0xCC10142C), RoundedCornerShape(12.dp))
+                        .padding(horizontal = 18.dp, vertical = 10.dp),
+                )
             }
 
             AnimatedVisibility(
@@ -807,26 +856,42 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
-    private fun ToolBar(vertical: Boolean, onKeys: () -> Unit, onPower: () -> Unit, onClose: () -> Unit) {
+    private fun ToolBar(
+        vertical: Boolean,
+        trackpad: Boolean,
+        onKeyboard: () -> Unit,
+        onMode: () -> Unit,
+        onKeys: () -> Unit,
+        onPower: () -> Unit,
+        onClose: () -> Unit,
+    ) {
         val bg = Color(0xFF10142C)
         if (vertical) {
             Column(
                 Modifier.fillMaxHeight().background(bg).padding(4.dp),
                 verticalArrangement = Arrangement.SpaceEvenly,
                 horizontalAlignment = Alignment.CenterHorizontally,
-            ) { ToolButtons(onKeys, onPower, onClose) }
+            ) { ToolButtons(trackpad, onKeyboard, onMode, onKeys, onPower, onClose) }
         } else {
             Row(
                 Modifier.fillMaxWidth().background(bg).padding(4.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
-            ) { ToolButtons(onKeys, onPower, onClose) }
+            ) { ToolButtons(trackpad, onKeyboard, onMode, onKeys, onPower, onClose) }
         }
     }
 
     @Composable
-    private fun ToolButtons(onKeys: () -> Unit, onPower: () -> Unit, onClose: () -> Unit) {
-        ToolButton("⌨") { remoteView.toggleKeyboard() }
+    private fun ToolButtons(
+        trackpad: Boolean,
+        onKeyboard: () -> Unit,
+        onMode: () -> Unit,
+        onKeys: () -> Unit,
+        onPower: () -> Unit,
+        onClose: () -> Unit,
+    ) {
+        ToolButton("⌨") { onKeyboard() }
+        ToolButton(if (trackpad) "◍" else "✛") { onMode() }
         ToolButton("Fn") { onKeys() }
         ToolButton("⏻") { onPower() }
         ToolButton("✕") { onClose() }
