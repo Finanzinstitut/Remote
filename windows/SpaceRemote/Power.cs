@@ -11,12 +11,12 @@ static class Power
     {
         switch (action)
         {
-            case 0: Run("shutdown", "/s /t 0"); break;   // komplett herunterfahren (kein Schnellstart)
+            case 0: Run("shutdown", "/s /t 0"); break;   // full shutdown, bypassing fast startup
             case 1: Run("shutdown", "/r /t 0"); break;
             case 2:
                 new Thread(() =>
                 {
-                    Thread.Sleep(800); // Handy kurz trennen lassen
+                    Thread.Sleep(800); // give the phone a moment to disconnect
                     Application.SetSuspendState(PowerState.Suspend, false, false);
                 }) { IsBackground = true }.Start();
                 break;

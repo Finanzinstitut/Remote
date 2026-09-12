@@ -9,7 +9,7 @@ on:
 
 jobs:
   windows:
-    name: Windows-App
+    name: Windows app
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -18,7 +18,7 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Publish (eine einzelne .exe, ohne .NET-Installation lauffähig)
+      - name: Publish a single self-contained .exe
         run: >
           dotnet publish windows/SpaceRemote/SpaceRemote.csproj
           -c Release -r win-x64 --self-contained true
@@ -33,7 +33,7 @@ jobs:
           path: out/SpaceRemote.exe
 
   android:
-    name: Android-App
+    name: Android app
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -43,8 +43,8 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      # Gleicher Debug-Schlüssel bei jedem Build -> App-Updates ohne Deinstallieren
-      - name: Debug-Keystore wiederverwenden
+      # Same debug key on every build -> updates install over the old app
+      - name: Reuse debug keystore
         uses: actions/cache@v4
         with:
           path: ~/.android/debug.keystore
@@ -54,11 +54,11 @@ jobs:
         with:
           gradle-version: '8.11.1'
 
-      - name: APK bauen
+      - name: Build APK
         working-directory: android
         run: gradle assembleDebug --no-daemon --stacktrace
 
-      - name: APK umbenennen
+      - name: Rename APK
         run: cp android/app/build/outputs/apk/debug/app-debug.apk SpaceRemote.apk
 
       - uses: actions/upload-artifact@v4

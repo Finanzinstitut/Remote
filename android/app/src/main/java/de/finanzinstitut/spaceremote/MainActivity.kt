@@ -7,8 +7,25 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -27,11 +44,12 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -48,8 +66,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -70,8 +94,12 @@ import kotlinx.coroutines.withContext
 
 enum class Screen { HOME, SETTINGS, CONNECTING, REMOTE }
 
-private val Muted = Color(0xFF9AA3C7)
-private val ErrorRed = Color(0xFFFF8A80)
+private val Ink = Color(0xFF070A18)
+private val Deep = Color(0xFF141A3C)
+private val Accent = Color(0xFF7C9CFF)
+private val Mint = Color(0xFF5BE0C0)
+private val Muted = Color(0xFF98A2C8)
+private val Danger = Color(0xFFFF8A80)
 
 private val specialKeys = listOf(
     Triple("Esc", Vk.ESCAPE, 0),
@@ -80,11 +108,11 @@ private val specialKeys = listOf(
     Triple("Alt+Tab", Vk.TAB, Mod.ALT),
     Triple("Alt+F4", 0x73, Mod.ALT),
     Triple("Win+D", 0x44, Mod.WIN),
-    Triple("Strg+C", 0x43, Mod.CTRL),
-    Triple("Strg+V", 0x56, Mod.CTRL),
-    Triple("Strg+Z", 0x5A, Mod.CTRL),
-    Triple("Entf", Vk.DELETE, 0),
-    Triple("Task-Manager", Vk.ESCAPE, Mod.CTRL or Mod.SHIFT),
+    Triple("Ctrl+C", 0x43, Mod.CTRL),
+    Triple("Ctrl+V", 0x56, Mod.CTRL),
+    Triple("Ctrl+Z", 0x5A, Mod.CTRL),
+    Triple("Del", Vk.DELETE, 0),
+    Triple("Task Manager", Vk.ESCAPE, Mod.CTRL or Mod.SHIFT),
     Triple("←", Vk.LEFT, 0),
     Triple("↑", Vk.UP, 0),
     Triple("↓", Vk.DOWN, 0),
@@ -116,15 +144,14 @@ class MainActivity : ComponentActivity() {
         setContent {
             MaterialTheme(
                 colorScheme = darkColorScheme(
-                    primary = Color(0xFF8FA8FF),
-                    onPrimary = Color(0xFF0A0D1F),
-                    background = Color(0xFF0A0D1F),
-                    surface = Color(0xFF151A33),
+                    primary = Accent,
+                    onPrimary = Ink,
+                    secondary = Mint,
+                    background = Ink,
+                    surface = Color(0xFF171D3A),
                 )
             ) {
-                Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
-                    Root()
-                }
+                Surface(Modifier.fillMaxSize(), color = Ink) { Root() }
             }
         }
     }
@@ -134,12 +161,12 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    // ------------------------------------------------------------ Logik
+    // ------------------------------------------------------------ logic
 
-    /** Erst verbinden; klappt das nicht, PC per Wake-on-LAN wecken und warten, bis er da ist. */
+    /** Try to connect first; if that fails, wake the PC and keep retrying until it answers. */
     private fun startConnect() {
         message = null
-        status = "Verbinde mit ${prefs.host} …"
+        status = "Connecting to ${prefs.host}…"
         screen = Screen.CONNECTING
         connectJob?.cancel()
 
@@ -149,17 +176,26 @@ class MainActivity : ComponentActivity() {
             val password = prefs.password
             val mac = prefs.mac
             val broadcast = prefs.broadcast
-            val canWake = mac.isNotBlank()
-            val limitMs = if (canWake) 240_000L else 20_000L
+            val wakeUrl = prefs.wakeUrl
+            val local = WakeOnLan.isLocalNetwork(host)
+            // A Wake-on-LAN broadcast never reaches the home network from outside.
+            val canWol = mac.isNotBlank() && local
+            val canWakeUrl = wakeUrl.isNotBlank()
+            val canWake = canWol || canWakeUrl
+            val limitMs = if (canWake) 300_000L else if (local) 20_000L else 45_000L
             val start = SystemClock.elapsedRealtime()
             var lastWake = 0L
+            var urlCalled = false
             var first = true
 
             while (isActive) {
                 if (SystemClock.elapsedRealtime() - start > limitMs) {
                     disconnect(
-                        if (canWake) "Der PC hat sich nicht gemeldet. Prüfe Wake-on-LAN und ob Space Remote auf dem PC automatisch startet."
-                        else "PC nicht erreichbar. Trag in den Einstellungen die MAC-Adresse ein, damit die App ihn aufwecken kann."
+                        when {
+                            canWake -> "The PC never answered. Check that it actually powers on and that Space Remote starts automatically."
+                            local -> "PC unreachable. Add the MAC address in settings so the app can wake it."
+                            else -> "PC unreachable. Is Tailscale running on both devices? Powering on from outside needs a wake URL."
+                        }
                     )
                     return@launch
                 }
@@ -176,7 +212,8 @@ class MainActivity : ComponentActivity() {
                 try {
                     remoteView.clear()
                     hasFrame = false
-                    withContext(Dispatchers.IO) { c.connect(host, port, password, if (first) 1500 else 2500) }
+                    val timeout = if (local) (if (first) 1500 else 2500) else (if (first) 4000 else 6000)
+                    withContext(Dispatchers.IO) { c.connect(host, port, password, timeout) }
                     client = c
                     remoteView.client = c
                     screen = Screen.REMOTE
@@ -187,24 +224,38 @@ class MainActivity : ComponentActivity() {
                     throw e
                 } catch (e: AuthException) {
                     c.close()
-                    disconnect("Falsches Passwort. Das richtige zeigt dir die Windows-App unter „Verbindungsdaten anzeigen“.")
+                    disconnect("Wrong password. The Windows app shows the correct one under “Show connection details”.")
                     return@launch
                 } catch (e: Exception) {
                     c.close()
                     first = false
-                    if (canWake && SystemClock.elapsedRealtime() - lastWake > 20_000) {
-                        status = "PC ist aus – sende Wake-on-LAN …"
+
+                    if (canWakeUrl && !urlCalled) {
+                        status = "Powering on the PC…"
+                        urlCalled = true
+                        try {
+                            withContext(Dispatchers.IO) { WakeUrl.call(wakeUrl) }
+                            lastWake = SystemClock.elapsedRealtime()
+                        } catch (w: Exception) {
+                            disconnect("Wake URL failed: ${w.message}")
+                            return@launch
+                        }
+                    }
+
+                    if (canWol && SystemClock.elapsedRealtime() - lastWake > 20_000) {
+                        status = "PC is off — sending Wake-on-LAN…"
                         try {
                             withContext(Dispatchers.IO) { WakeOnLan.send(mac, host, broadcast) }
                             lastWake = SystemClock.elapsedRealtime()
                         } catch (w: Exception) {
-                            disconnect("Wake-on-LAN fehlgeschlagen: ${w.message}")
+                            disconnect("Wake-on-LAN failed: ${w.message}")
                             return@launch
                         }
                     }
+
                     val secs = (SystemClock.elapsedRealtime() - start) / 1000
-                    status = if (lastWake > 0) "PC startet …\nWarte auf Windows und Space Remote ($secs s)"
-                    else "Verbinde … ($secs s)"
+                    status = if (lastWake > 0) "PC is booting…\nWaiting for Windows and Space Remote (${secs}s)"
+                    else "Connecting… (${secs}s)"
                     delay(2000)
                 }
             }
@@ -226,16 +277,16 @@ class MainActivity : ComponentActivity() {
 
     private fun onClientClosed(c: RemoteClient, err: String?) {
         if (client !== c) return
-        disconnect(if (err != null) "Verbindung getrennt: $err" else "Verbindung getrennt.")
+        disconnect(if (err != null) "Disconnected: $err" else "Disconnected.")
     }
 
     private fun powerAction(action: Int) {
         client?.power(action)
         if (action in 0..2) {
             val text = when (action) {
-                0 -> "PC wird heruntergefahren."
-                1 -> "PC startet neu. Tippe gleich wieder auf „PC starten“."
-                else -> "PC ist im Energiesparmodus."
+                0 -> "Shutting the PC down."
+                1 -> "PC is restarting. Tap “Start PC” again in a moment."
+                else -> "PC is asleep."
             }
             lifecycleScope.launch {
                 delay(700)
@@ -258,58 +309,181 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun Root() {
-        when (screen) {
-            Screen.SETTINGS -> {
-                BackHandler(enabled = prefs.isConfigured) { screen = Screen.HOME }
-                SettingsScreen()
+        AnimatedContent(
+            targetState = screen,
+            transitionSpec = {
+                (fadeIn(tween(280)) + slideInVertically(tween(320)) { it / 14 })
+                    .togetherWith(fadeOut(tween(180)) + slideOutVertically(tween(220)) { -it / 20 })
+            },
+            label = "screen",
+        ) { target ->
+            when (target) {
+                Screen.SETTINGS -> {
+                    BackHandler(enabled = prefs.isConfigured) { screen = Screen.HOME }
+                    SettingsScreen()
+                }
+                Screen.HOME -> HomeScreen()
+                Screen.CONNECTING -> {
+                    BackHandler { disconnect() }
+                    ConnectingScreen()
+                }
+                Screen.REMOTE -> RemoteScreen()
             }
-            Screen.HOME -> HomeScreen()
-            Screen.CONNECTING -> {
-                BackHandler { disconnect() }
-                ConnectingScreen()
-            }
-            Screen.REMOTE -> RemoteScreen()
         }
+    }
+
+    /** Slowly drifting background glow, shared by the calm screens. */
+    @Composable
+    private fun AuroraBackground(content: @Composable () -> Unit) {
+        val drift = rememberInfiniteTransition(label = "aurora")
+        val shift by drift.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(9000, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "shift",
+        )
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Brush.verticalGradient(listOf(Deep, Ink)))
+                .drawBehind {
+                    val cx = size.width * (0.25f + 0.5f * shift)
+                    val cy = size.height * (0.18f + 0.12f * shift)
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Accent.copy(alpha = 0.30f), Color.Transparent),
+                            center = Offset(cx, cy),
+                            radius = size.minDimension * 0.85f,
+                        ),
+                        radius = size.minDimension * 0.85f,
+                        center = Offset(cx, cy),
+                    )
+                    val mx = size.width * (0.85f - 0.45f * shift)
+                    val my = size.height * (0.82f - 0.1f * shift)
+                    drawCircle(
+                        brush = Brush.radialGradient(
+                            colors = listOf(Mint.copy(alpha = 0.16f), Color.Transparent),
+                            center = Offset(mx, my),
+                            radius = size.minDimension * 0.7f,
+                        ),
+                        radius = size.minDimension * 0.7f,
+                        center = Offset(mx, my),
+                    )
+                },
+            content = { content() },
+        )
     }
 
     @Composable
     private fun HomeScreen() {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .background(Brush.verticalGradient(listOf(Color(0xFF1B2150), Color(0xFF0A0D1F))))
-                .safeDrawingPadding()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            Text("Space Remote", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Color.White)
-            Text("${prefs.host}:${prefs.port}", color = Muted)
-            Spacer(Modifier.height(48.dp))
+        AuroraBackground {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .safeDrawingPadding()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Text("Space Remote", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Spacer(Modifier.height(4.dp))
+                Text("${prefs.host}:${prefs.port}", color = Muted, fontSize = 14.sp)
+
+                Spacer(Modifier.height(52.dp))
+                PowerButton()
+                Spacer(Modifier.height(28.dp))
+
+                Text(
+                    when {
+                        prefs.wakeUrl.isNotBlank() -> "Switches the outlet on, then shows your screen once Windows is ready."
+                        !WakeOnLan.isLocalNetwork(prefs.host) -> "Connecting over Tailscale. The PC needs to be running already."
+                        prefs.mac.isBlank() -> "Without a MAC address the app only connects, it can't wake the PC."
+                        else -> "Wakes your PC and shows its screen once Windows is ready."
+                    },
+                    color = Muted,
+                    fontSize = 13.sp,
+                    textAlign = TextAlign.Center,
+                )
+
+                AnimatedVisibility(
+                    visible = message != null,
+                    enter = fadeIn(tween(250)) + slideInVertically(tween(280)) { it / 3 },
+                    exit = fadeOut(tween(150)),
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Spacer(Modifier.height(20.dp))
+                        Box(
+                            Modifier
+                                .background(Color(0x33FF5252), RoundedCornerShape(14.dp))
+                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                        ) {
+                            Text(message ?: "", color = Danger, textAlign = TextAlign.Center, fontSize = 14.sp)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(36.dp))
+                TextButton(onClick = { message = null; screen = Screen.SETTINGS }) {
+                    Text("Settings", color = Muted)
+                }
+            }
+        }
+    }
+
+    /** Big round button with a breathing halo and a press-down response. */
+    @Composable
+    private fun PowerButton() {
+        val breathe = rememberInfiniteTransition(label = "breathe")
+        val pulse by breathe.animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(2600, easing = LinearEasing), RepeatMode.Restart),
+            label = "pulse",
+        )
+        val interaction = remember { MutableInteractionSource() }
+        val pressed by interaction.collectIsPressedAsState()
+        val scale by animateFloatAsState(if (pressed) 0.94f else 1f, tween(140), label = "press")
+
+        Box(contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .size(260.dp)
+                    .drawBehind {
+                        // two rings expanding outwards, offset in time
+                        for (i in 0..1) {
+                            val p = (pulse + i * 0.5f) % 1f
+                            val radius = size.minDimension * (0.34f + 0.16f * p)
+                            drawCircle(
+                                color = Accent.copy(alpha = 0.35f * (1f - p)),
+                                radius = radius,
+                                style = Stroke(width = 2.dp.toPx()),
+                            )
+                        }
+                        drawRect(
+                            brush = Brush.radialGradient(
+                                colors = listOf(Accent.copy(alpha = 0.22f), Color.Transparent),
+                                center = Offset(size.width / 2f, size.height / 2f),
+                                radius = size.minDimension * 0.5f,
+                            ),
+                            size = Size(size.width, size.height),
+                        )
+                    }
+            )
             Button(
                 onClick = { startConnect() },
                 shape = CircleShape,
-                modifier = Modifier.size(210.dp),
+                interactionSource = interaction,
+                elevation = ButtonDefaults.buttonElevation(defaultElevation = 0.dp, pressedElevation = 0.dp),
+                modifier = Modifier
+                    .size(196.dp)
+                    .scale(scale),
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("⏻", fontSize = 56.sp)
-                    Text("PC starten", fontSize = 20.sp, fontWeight = FontWeight.SemiBold)
+                    Text("⏻", fontSize = 54.sp)
+                    Spacer(Modifier.height(2.dp))
+                    Text("Start PC", fontSize = 19.sp, fontWeight = FontWeight.SemiBold)
                 }
             }
-            Spacer(Modifier.height(20.dp))
-            Text(
-                if (prefs.mac.isBlank()) "Ohne MAC-Adresse wird nur verbunden, nicht aufgeweckt."
-                else "Weckt den PC auf und zeigt seinen Bildschirm, sobald Windows bereit ist.",
-                color = Muted,
-                fontSize = 13.sp,
-                textAlign = TextAlign.Center,
-            )
-            message?.let {
-                Spacer(Modifier.height(16.dp))
-                Text(it, color = ErrorRed, textAlign = TextAlign.Center)
-            }
-            Spacer(Modifier.height(32.dp))
-            TextButton(onClick = { message = null; screen = Screen.SETTINGS }) { Text("Einstellungen") }
         }
     }
 
@@ -320,52 +494,89 @@ class MainActivity : ComponentActivity() {
         var password by remember { mutableStateOf(prefs.password) }
         var mac by remember { mutableStateOf(prefs.mac) }
         var broadcast by remember { mutableStateOf(prefs.broadcast) }
+        var wakeUrl by remember { mutableStateOf(prefs.wakeUrl) }
         var error by remember { mutableStateOf<String?>(null) }
+        var showAdvanced by remember { mutableStateOf(prefs.mac.isNotBlank() || prefs.wakeUrl.isNotBlank()) }
 
-        Column(
-            Modifier
-                .fillMaxSize()
-                .safeDrawingPadding()
-                .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(24.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-        ) {
-            Text("Einstellungen", fontSize = 26.sp, fontWeight = FontWeight.Bold)
-            Text(
-                "Alle Werte zeigt dir die Windows-App: Rechtsklick auf das Space-Remote-Symbol unten rechts in der Taskleiste → „Verbindungsdaten anzeigen“.",
-                color = Muted,
-                fontSize = 14.sp,
-            )
-            Field("IP-Adresse des PCs", host, { host = it }, "z. B. 192.168.178.20", KeyboardType.Uri)
-            Field("Port", port, { port = it.filter(Char::isDigit) }, "47800", KeyboardType.Number)
-            Field("Passwort", password, { password = it }, "aus der Windows-App", KeyboardType.Ascii)
-            Field("MAC-Adresse (für Wake-on-LAN)", mac, { mac = it }, "AA:BB:CC:DD:EE:FF", KeyboardType.Ascii)
-            Field("Broadcast-Adresse (optional)", broadcast, { broadcast = it }, "leer = automatisch", KeyboardType.Uri)
-            error?.let { Text(it, color = ErrorRed) }
-            Button(
-                onClick = {
-                    val p = port.toIntOrNull()
-                    error = when {
-                        host.isBlank() -> "Bitte die IP-Adresse des PCs eintragen."
-                        p == null || p !in 1..65535 -> "Der Port muss zwischen 1 und 65535 liegen."
-                        password.isBlank() -> "Bitte das Passwort aus der Windows-App eintragen."
-                        mac.isNotBlank() && WakeOnLan.parseMac(mac) == null -> "Die MAC-Adresse braucht 12 Hex-Zeichen, z. B. AA:BB:CC:DD:EE:FF."
-                        else -> null
+        AuroraBackground {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .safeDrawingPadding()
+                    .imePadding()
+                    .verticalScroll(rememberScrollState())
+                    .padding(24.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text("Settings", fontSize = 28.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text(
+                    "The Windows app shows every value: right-click the Space Remote icon in the taskbar tray → “Show connection details”.",
+                    color = Muted,
+                    fontSize = 14.sp,
+                )
+
+                Field("PC address", host, { host = it }, "192.168.178.20 or 100.x.x.x", KeyboardType.Uri)
+                Field("Port", port, { port = it.filter(Char::isDigit) }, "47800", KeyboardType.Number)
+                Field("Password", password, { password = it }, "from the Windows app", KeyboardType.Ascii)
+
+                TextButton(onClick = { showAdvanced = !showAdvanced }) {
+                    Text(if (showAdvanced) "Hide wake options" else "Wake options", color = Accent)
+                }
+
+                AnimatedVisibility(
+                    visible = showAdvanced,
+                    enter = fadeIn(tween(200)) + slideInVertically(tween(260)) { -it / 6 },
+                    exit = fadeOut(tween(140)) + slideOutVertically(tween(200)) { -it / 6 },
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Field("MAC address (Wake-on-LAN)", mac, { mac = it }, "AA:BB:CC:DD:EE:FF", KeyboardType.Ascii)
+                        Field("Broadcast address (optional)", broadcast, { broadcast = it }, "empty = automatic", KeyboardType.Uri)
+                        Field("Wake URL (optional)", wakeUrl, { wakeUrl = it }, "http://…/relay/0?turn=on", KeyboardType.Uri)
+                        Text(
+                            "Away from home: enter your PC's Tailscale address above. Wake-on-LAN no longer reaches it from " +
+                                "outside, so powering on needs a smart plug whose switch URL you put in the wake URL field.",
+                            color = Muted,
+                            fontSize = 13.sp,
+                        )
                     }
-                    if (error == null) {
-                        prefs.host = host
-                        prefs.port = p!!
-                        prefs.password = password
-                        prefs.mac = mac
-                        prefs.broadcast = broadcast
-                        screen = Screen.HOME
+                }
+
+                AnimatedVisibility(visible = error != null, enter = fadeIn(tween(200)), exit = fadeOut(tween(120))) {
+                    Text(error ?: "", color = Danger)
+                }
+
+                Button(
+                    onClick = {
+                        val p = port.toIntOrNull()
+                        error = when {
+                            host.isBlank() -> "Enter the address of your PC."
+                            p == null || p !in 1..65535 -> "The port has to be between 1 and 65535."
+                            password.isBlank() -> "Enter the password from the Windows app."
+                            mac.isNotBlank() && WakeOnLan.parseMac(mac) == null ->
+                                "A MAC address needs 12 hex characters, for example AA:BB:CC:DD:EE:FF."
+                            wakeUrl.isNotBlank() && !wakeUrl.startsWith("http://") && !wakeUrl.startsWith("https://") ->
+                                "The wake URL has to start with http:// or https://."
+                            else -> null
+                        }
+                        if (error == null) {
+                            prefs.host = host
+                            prefs.port = p!!
+                            prefs.password = password
+                            prefs.mac = mac
+                            prefs.broadcast = broadcast
+                            prefs.wakeUrl = wakeUrl
+                            screen = Screen.HOME
+                        }
+                    },
+                    shape = RoundedCornerShape(16.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) { Text("Save", fontSize = 16.sp) }
+
+                if (prefs.isConfigured) {
+                    TextButton(onClick = { screen = Screen.HOME }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Cancel", color = Muted)
                     }
-                },
-                modifier = Modifier.fillMaxWidth(),
-            ) { Text("Speichern") }
-            if (prefs.isConfigured) {
-                TextButton(onClick = { screen = Screen.HOME }, modifier = Modifier.fillMaxWidth()) { Text("Abbrechen") }
+                }
             }
         }
     }
@@ -376,8 +587,9 @@ class MainActivity : ComponentActivity() {
             value = value,
             onValueChange = onChange,
             label = { Text(label) },
-            placeholder = { Text(hint) },
+            placeholder = { Text(hint, color = Muted) },
             singleLine = true,
+            shape = RoundedCornerShape(14.dp),
             keyboardOptions = KeyboardOptions(keyboardType = type),
             modifier = Modifier.fillMaxWidth(),
         )
@@ -385,19 +597,77 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun ConnectingScreen() {
-        Column(
-            Modifier
-                .fillMaxSize()
-                .safeDrawingPadding()
-                .padding(24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
-        ) {
-            CircularProgressIndicator(modifier = Modifier.size(64.dp))
-            Spacer(Modifier.height(28.dp))
-            Text(status, fontSize = 17.sp, textAlign = TextAlign.Center)
-            Spacer(Modifier.height(36.dp))
-            OutlinedButton(onClick = { disconnect() }) { Text("Abbrechen") }
+        AuroraBackground {
+            Column(
+                Modifier
+                    .fillMaxSize()
+                    .safeDrawingPadding()
+                    .padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Orbit()
+                Spacer(Modifier.height(36.dp))
+                AnimatedContent(
+                    targetState = status,
+                    transitionSpec = { fadeIn(tween(220)).togetherWith(fadeOut(tween(160))) },
+                    label = "status",
+                ) { s ->
+                    Text(s, fontSize = 16.sp, color = Color.White, textAlign = TextAlign.Center)
+                }
+                Spacer(Modifier.height(40.dp))
+                OutlinedButton(onClick = { disconnect() }, shape = RoundedCornerShape(14.dp)) {
+                    Text("Cancel")
+                }
+            }
+        }
+    }
+
+    /** Two arcs spinning at different speeds — calmer than a plain spinner. */
+    @Composable
+    private fun Orbit() {
+        val spin = rememberInfiniteTransition(label = "orbit")
+        val outer by spin.animateFloat(
+            initialValue = 0f,
+            targetValue = 360f,
+            animationSpec = infiniteRepeatable(tween(2200, easing = LinearEasing), RepeatMode.Restart),
+            label = "outer",
+        )
+        val inner by spin.animateFloat(
+            initialValue = 360f,
+            targetValue = 0f,
+            animationSpec = infiniteRepeatable(tween(3400, easing = LinearEasing), RepeatMode.Restart),
+            label = "inner",
+        )
+        Box(Modifier.size(96.dp), contentAlignment = Alignment.Center) {
+            Box(
+                Modifier
+                    .size(96.dp)
+                    .rotate(outer)
+                    .drawBehind {
+                        drawArc(
+                            color = Accent,
+                            startAngle = 0f,
+                            sweepAngle = 110f,
+                            useCenter = false,
+                            style = Stroke(width = 4.dp.toPx()),
+                        )
+                    }
+            )
+            Box(
+                Modifier
+                    .size(64.dp)
+                    .rotate(inner)
+                    .drawBehind {
+                        drawArc(
+                            color = Mint,
+                            startAngle = 40f,
+                            sweepAngle = 80f,
+                            useCenter = false,
+                            style = Stroke(width = 3.dp.toPx()),
+                        )
+                    }
+            )
         }
     }
 
@@ -427,12 +697,12 @@ class MainActivity : ComponentActivity() {
             if (landscape) {
                 Row(Modifier.fillMaxSize()) {
                     StreamArea(Modifier.weight(1f).fillMaxHeight(), showKeys, stale)
-                    ToolBar(true, { showKeys = !showKeys }, { showPower = true }, { disconnect() })
+                    ToolBar(true, { showKeys = !showKeys }, { showPower = true }, { confirmLeave = true })
                 }
             } else {
                 Column(Modifier.fillMaxSize()) {
                     StreamArea(Modifier.weight(1f).fillMaxWidth(), showKeys, stale)
-                    ToolBar(false, { showKeys = !showKeys }, { showPower = true }, { disconnect() })
+                    ToolBar(false, { showKeys = !showKeys }, { showPower = true }, { confirmLeave = true })
                 }
             }
         }
@@ -440,29 +710,30 @@ class MainActivity : ComponentActivity() {
         if (showPower) {
             AlertDialog(
                 onDismissRequest = { showPower = false },
-                title = { Text("PC-Energie") },
+                shape = RoundedCornerShape(20.dp),
+                title = { Text("PC power") },
                 text = {
                     Column {
-                        listOf("Herunterfahren" to 0, "Neu starten" to 1, "Energiesparen" to 2, "Sperren" to 3)
-                            .forEach { (label, action) ->
-                                TextButton(
-                                    onClick = { showPower = false; powerAction(action) },
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) { Text(label) }
-                            }
+                        listOf("Shut down" to 0, "Restart" to 1, "Sleep" to 2, "Lock" to 3).forEach { (label, action) ->
+                            TextButton(
+                                onClick = { showPower = false; powerAction(action) },
+                                modifier = Modifier.fillMaxWidth(),
+                            ) { Text(label) }
+                        }
                     }
                 },
-                confirmButton = { TextButton(onClick = { showPower = false }) { Text("Abbrechen") } },
+                confirmButton = { TextButton(onClick = { showPower = false }) { Text("Cancel") } },
             )
         }
 
         if (confirmLeave) {
             AlertDialog(
                 onDismissRequest = { confirmLeave = false },
-                title = { Text("Verbindung trennen?") },
-                text = { Text("Der PC läuft weiter.") },
-                confirmButton = { TextButton(onClick = { confirmLeave = false; disconnect() }) { Text("Trennen") } },
-                dismissButton = { TextButton(onClick = { confirmLeave = false }) { Text("Abbrechen") } },
+                shape = RoundedCornerShape(20.dp),
+                title = { Text("Disconnect?") },
+                text = { Text("Your PC keeps running.") },
+                confirmButton = { TextButton(onClick = { confirmLeave = false; disconnect() }) { Text("Disconnect") } },
+                dismissButton = { TextButton(onClick = { confirmLeave = false }) { Text("Cancel") } },
             )
         }
     }
@@ -470,36 +741,62 @@ class MainActivity : ComponentActivity() {
     @Composable
     private fun StreamArea(modifier: Modifier, showKeys: Boolean, stale: Boolean) {
         Box(modifier) {
+            // the first frame fades in instead of snapping into place
+            val alpha by animateFloatAsState(if (hasFrame) 1f else 0f, tween(420), label = "frame")
             AndroidView(
                 factory = { remoteView.also { v -> (v.parent as? ViewGroup)?.removeView(v) } },
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .scale(0.985f + 0.015f * alpha),
             )
-            if (!hasFrame) {
-                Text("Warte auf Bild …", color = Color.White, modifier = Modifier.align(Alignment.Center))
-            } else if (stale) {
+
+            AnimatedVisibility(
+                visible = !hasFrame,
+                enter = fadeIn(tween(200)),
+                exit = fadeOut(tween(300)),
+                modifier = Modifier.align(Alignment.Center),
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Orbit()
+                    Spacer(Modifier.height(16.dp))
+                    Text("Waiting for the first frame…", color = Muted, fontSize = 14.sp)
+                }
+            }
+
+            AnimatedVisibility(
+                visible = stale,
+                enter = fadeIn(tween(250)) + slideInVertically(tween(280)) { -it },
+                exit = fadeOut(tween(180)) + slideOutVertically(tween(220)) { -it },
+                modifier = Modifier.align(Alignment.TopCenter),
+            ) {
                 Text(
-                    "Kein Bild – PC gesperrt oder Anmeldebildschirm?",
+                    "No image — PC locked or on the sign-in screen?",
                     color = Color.White,
                     fontSize = 13.sp,
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
                         .padding(8.dp)
-                        .background(Color(0xAA000000))
-                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                        .background(Color(0xCC000000), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 6.dp),
                 )
             }
-            if (showKeys) {
+
+            AnimatedVisibility(
+                visible = showKeys,
+                enter = fadeIn(tween(180)) + slideInVertically(tween(240)) { it },
+                exit = fadeOut(tween(140)) + slideOutVertically(tween(200)) { it },
+                modifier = Modifier.align(Alignment.BottomCenter),
+            ) {
                 Row(
                     Modifier
-                        .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .background(Color(0xCC000000))
+                        .background(Color(0xE6060A18))
                         .horizontalScroll(rememberScrollState())
                         .padding(6.dp)
                 ) {
                     specialKeys.forEach { (label, vk, mods) ->
                         FilledTonalButton(
                             onClick = { client?.key(vk, mods) },
+                            shape = RoundedCornerShape(12.dp),
                             modifier = Modifier.padding(horizontal = 3.dp),
                             contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                         ) { Text(label) }
@@ -511,23 +808,19 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun ToolBar(vertical: Boolean, onKeys: () -> Unit, onPower: () -> Unit, onClose: () -> Unit) {
-        val bg = Color(0xFF12152A)
+        val bg = Color(0xFF10142C)
         if (vertical) {
             Column(
                 Modifier.fillMaxHeight().background(bg).padding(4.dp),
                 verticalArrangement = Arrangement.SpaceEvenly,
                 horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                ToolButtons(onKeys, onPower, onClose)
-            }
+            ) { ToolButtons(onKeys, onPower, onClose) }
         } else {
             Row(
                 Modifier.fillMaxWidth().background(bg).padding(4.dp),
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 verticalAlignment = Alignment.CenterVertically,
-            ) {
-                ToolButtons(onKeys, onPower, onClose)
-            }
+            ) { ToolButtons(onKeys, onPower, onClose) }
         }
     }
 
@@ -541,6 +834,11 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     private fun ToolButton(label: String, onClick: () -> Unit) {
-        TextButton(onClick = onClick) { Text(label, color = Color.White, fontSize = 20.sp) }
+        val interaction = remember { MutableInteractionSource() }
+        val pressed by interaction.collectIsPressedAsState()
+        val scale by animateFloatAsState(if (pressed) 0.86f else 1f, tween(110), label = "tool")
+        TextButton(onClick = onClick, interactionSource = interaction, modifier = Modifier.scale(scale)) {
+            Text(label, color = Color.White, fontSize = 20.sp)
+        }
     }
 }

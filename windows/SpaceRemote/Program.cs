@@ -8,7 +8,7 @@ static class Program
         using var mutex = new Mutex(true, "SpaceRemote_Finanzinstitut_SingleInstance", out bool isNew);
         if (!isNew)
         {
-            MessageBox.Show("Space Remote läuft bereits (Symbol unten rechts im Infobereich der Taskleiste).",
+            MessageBox.Show("Space Remote is already running (look for the icon in the taskbar tray).",
                 "Space Remote", MessageBoxButtons.OK, MessageBoxIcon.Information);
             return;
         }
@@ -25,12 +25,13 @@ static class Program
         }
         catch (Exception ex)
         {
-            MessageBox.Show($"Port {config.Port} konnte nicht geöffnet werden:\n{ex.Message}",
+            MessageBox.Show($"Could not open port {config.Port}:\n{ex.Message}",
                 "Space Remote", MessageBoxButtons.OK, MessageBoxIcon.Error);
             return;
         }
 
         Application.Run(new TrayContext(config, server));
         server.Stop();
+        StayAwake.Set(false);
     }
 }

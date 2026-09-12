@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace SpaceRemote;
 
-/// <summary>Maus- und Tastatureingaben per SendInput.</summary>
+/// <summary>Mouse and keyboard input via SendInput.</summary>
 static class InputSim
 {
     const uint INPUT_MOUSE = 0, INPUT_KEYBOARD = 1;
@@ -82,10 +82,10 @@ static class InputSim
     public static void KeyPress(int mods, ushort vk)
     {
         var modKeys = new List<ushort>();
-        if ((mods & 1) != 0) modKeys.Add(0xA2); // Strg links
-        if ((mods & 2) != 0) modKeys.Add(0xA4); // Alt links
-        if ((mods & 4) != 0) modKeys.Add(0xA0); // Shift links
-        if ((mods & 8) != 0) modKeys.Add(0x5B); // Windows
+        if ((mods & 1) != 0) modKeys.Add(0xA2); // left Ctrl
+        if ((mods & 2) != 0) modKeys.Add(0xA4); // left Alt
+        if ((mods & 4) != 0) modKeys.Add(0xA0); // left Shift
+        if ((mods & 8) != 0) modKeys.Add(0x5B); // Windows key
 
         var list = new List<INPUT>();
         foreach (var m in modKeys) list.Add(VkEvent(m, false));

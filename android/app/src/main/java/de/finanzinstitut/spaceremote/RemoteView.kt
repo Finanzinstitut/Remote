@@ -24,9 +24,9 @@ import kotlin.math.hypot
 import kotlin.math.min
 
 /**
- * Zeigt den PC-Bildschirm und übersetzt Touch in Maus:
- *  Tippen = Linksklick, Doppeltippen = Doppelklick, lange drücken = Rechtsklick,
- *  ziehen = mit gedrückter Maustaste ziehen, zwei Finger = scrollen.
+ * Shows the PC screen and turns touch into mouse input:
+ *  tap = left click, double tap = double click, long press = right click,
+ *  drag = drag with the button held, two fingers = scroll.
  */
 class RemoteView(context: Context) : View(context) {
 
@@ -61,7 +61,7 @@ class RemoteView(context: Context) : View(context) {
         setBackgroundColor(Color.BLACK)
     }
 
-    /** Aus dem Netzwerk-Thread aufrufbar. */
+    /** Safe to call from the network thread. */
     fun setFrame(bmp: Bitmap) {
         lastFrameAt = SystemClock.elapsedRealtime()
         post {
@@ -160,7 +160,7 @@ class RemoteView(context: Context) : View(context) {
                     var tx = e.x
                     var ty = e.y
                     val now = SystemClock.elapsedRealtime()
-                    // Doppeltippen: gleiche Position verwenden, damit Windows einen Doppelklick erkennt
+                    // double tap: reuse the same position so Windows recognises a double click
                     if (now - lastTapTime < 400 && hypot(tx - lastTapX, ty - lastTapY) < touchSlop * 2) {
                         tx = lastTapX
                         ty = lastTapY
@@ -195,7 +195,7 @@ class RemoteView(context: Context) : View(context) {
         return if (n > 0) sum / n else 0f
     }
 
-    // ---------------- Tastatur ----------------
+    // ---------------- keyboard ----------------
 
     fun toggleKeyboard() {
         val visible = ViewCompat.getRootWindowInsets(this)?.isVisible(WindowInsetsCompat.Type.ime()) == true
@@ -218,7 +218,7 @@ class RemoteView(context: Context) : View(context) {
     override fun onCheckIsTextEditor(): Boolean = true
 
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection {
-        // "sichtbares Passwort" = keine Autokorrektur/Vorschläge -> Zeichen kommen direkt an
+        // "visible password" = no autocorrect or suggestions -> characters arrive as typed
         outAttrs.inputType = InputType.TYPE_CLASS_TEXT or
             InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD or
             InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
@@ -262,7 +262,7 @@ class RemoteView(context: Context) : View(context) {
         }
     }
 
-    /** Überträgt nur die Änderung gegenüber dem bisherigen "Composing"-Text. */
+    /** Sends only what changed compared to the previous composing text. */
     private fun applyComposing(new: String) {
         val c = client ?: return
         var p = 0

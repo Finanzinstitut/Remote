@@ -14,7 +14,7 @@ import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 import kotlin.concurrent.thread
 
-class AuthException : Exception("Falsches Passwort")
+class AuthException : Exception("Wrong password")
 
 object Mod {
     const val CTRL = 1
@@ -35,7 +35,7 @@ object Vk {
     const val DELETE = 0x2E
 }
 
-/** Verbindung zur Windows-App (Protokoll siehe windows/SpaceRemote/RemoteServer.cs). */
+/** Connection to the Windows app (protocol: see windows/SpaceRemote/RemoteServer.cs). */
 class RemoteClient(
     private val onFrame: (Bitmap) -> Unit,
     private val onDisconnected: (String?) -> Unit,
@@ -45,7 +45,7 @@ class RemoteClient(
     @Volatile private var closedByUser = false
     private val sender = Executors.newSingleThreadExecutor()
 
-    /** Blockierend – im IO-Thread aufrufen. */
+    /** Blocking — call from an IO thread. */
     fun connect(host: String, port: Int, password: String, timeoutMs: Int) {
         val s = Socket()
         try {
@@ -58,8 +58,8 @@ class RemoteClient(
 
             val magic = ByteArray(4)
             input.readFully(magic)
-            if (String(magic, Charsets.US_ASCII) != "SPRM") throw IOException("Kein Space-Remote-Server")
-            input.readByte() // Protokollversion
+            if (String(magic, Charsets.US_ASCII) != "SPRM") throw IOException("Not a Space Remote server")
+            input.readByte() // protocol version
             val nonce = ByteArray(16)
             input.readFully(nonce)
 
@@ -70,7 +70,7 @@ class RemoteClient(
 
             if (input.readByte().toInt() != 1) throw AuthException()
 
-            s.soTimeout = 20000 // Server schickt mind. alle 2 s etwas
+            s.soTimeout = 20000 // the server sends something at least every 2 s
             socket = s
             out = output
             thread(name = "remote-reader", isDaemon = true) { readLoop(s, input) }
@@ -82,14 +82,14 @@ class RemoteClient(
 
     private fun readLoop(s: Socket, input: DataInputStream) {
         var error: String? = null
-        // 3 Bitmaps im Wechsel wiederverwenden -> kaum Garbage Collection
+        // reuse 3 bitmaps in rotation -> almost no garbage collection
         val ring = arrayOfNulls<Bitmap>(3)
         var idx = 0
         try {
             while (true) {
                 val len = input.readInt()
                 if (len == 0) continue // Keepalive
-                if (len < 0 || len > 30_000_000) throw IOException("Ungültiges Paket")
+                if (len < 0 || len > 30_000_000) throw IOException("Invalid packet")
                 val data = ByteArray(len)
                 input.readFully(data)
 
@@ -100,7 +100,7 @@ class RemoteClient(
                 val bmp = try {
                     BitmapFactory.decodeByteArray(data, 0, len, opts)
                 } catch (e: IllegalArgumentException) {
-                    opts.inBitmap = null // Auflösung hat sich geändert
+                    opts.inBitmap = null // resolution changed
                     BitmapFactory.decodeByteArray(data, 0, len, opts)
                 }
                 if (bmp != null) {
@@ -110,7 +110,7 @@ class RemoteClient(
                 }
             }
         } catch (e: Exception) {
-            if (!closedByUser) error = e.message ?: "Verbindung verloren"
+            if (!closedByUser) error = e.message ?: "Connection lost"
         }
         runCatching { s.close() }
         onDisconnected(if (closedByUser) null else error)

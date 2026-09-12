@@ -24,16 +24,26 @@ sealed class TrayContext : ApplicationContext
         statusItem = new ToolStripMenuItem(server.Status) { Enabled = false };
         menu.Items.Add(statusItem);
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Verbindungsdaten anzeigen", null, (_, _) => ShowInfo());
+        menu.Items.Add("Show connection details", null, (_, _) => ShowInfo());
 
-        var autostart = new ToolStripMenuItem("Mit Windows starten") { CheckOnClick = true, Checked = Autostart.IsEnabled() };
+        var autostart = new ToolStripMenuItem("Start with Windows") { CheckOnClick = true, Checked = Autostart.IsEnabled() };
         autostart.CheckedChanged += (_, _) => Autostart.Set(autostart.Checked);
         menu.Items.Add(autostart);
 
-        menu.Items.Add("Firewall freigeben (Admin)", null, (_, _) => AddFirewallRule());
-        menu.Items.Add("Einstellungsordner öffnen", null, (_, _) => OpenConfigDir());
+        var keepAwake = new ToolStripMenuItem("Keep PC awake") { CheckOnClick = true, Checked = cfg.KeepAwake };
+        keepAwake.CheckedChanged += (_, _) =>
+        {
+            cfg.KeepAwake = keepAwake.Checked;
+            cfg.Save();
+            StayAwake.Set(keepAwake.Checked);
+        };
+        menu.Items.Add(keepAwake);
+        StayAwake.Set(cfg.KeepAwake);
+
+        menu.Items.Add("Allow through firewall (admin)", null, (_, _) => AddFirewallRule());
+        menu.Items.Add("Open settings folder", null, (_, _) => OpenConfigDir());
         menu.Items.Add(new ToolStripSeparator());
-        menu.Items.Add("Beenden", null, (_, _) => { tray.Visible = false; ExitThread(); });
+        menu.Items.Add("Quit", null, (_, _) => { tray.Visible = false; ExitThread(); });
 
         tray = new NotifyIcon
         {
@@ -47,16 +57,16 @@ sealed class TrayContext : ApplicationContext
         server.StatusChanged += s => invoker.BeginInvoke(new Action(() =>
         {
             statusItem.Text = s;
-            string t = "Space Remote – " + s;
+            string t = "Space Remote - " + s;
             tray.Text = t.Length > 63 ? t[..63] : t;
         }));
 
-        // Pfad aktuell halten, falls die .exe verschoben wurde
+        // keep the autostart path current in case the .exe was moved
         if (Autostart.IsEnabled()) Autostart.Set(true);
 
         if (!cfg.FirstRunDone)
         {
-            autostart.Checked = true; // löst Autostart.Set(true) aus
+            autostart.Checked = true; // triggers Autostart.Set(true)
             cfg.FirstRunDone = true;
             cfg.Save();
             invoker.BeginInvoke(new Action(ShowInfo));
@@ -66,23 +76,40 @@ sealed class TrayContext : ApplicationContext
     void ShowInfo()
     {
         var sb = new StringBuilder();
-        sb.AppendLine("Trage diese Daten in der Android-App ein:");
+        sb.AppendLine("Enter these values in the Android app:");
         sb.AppendLine();
         var ips = GetIPv4().ToList();
-        sb.AppendLine("IP-Adresse:  " + (ips.Count > 0 ? string.Join("  /  ", ips) : "keine Netzwerkverbindung"));
+        sb.AppendLine("Home network address:  " + (ips.Count > 0 ? string.Join("  /  ", ips) : "no network connection"));
+        string ts = GetTailscaleIp();
+        sb.AppendLine("Tailscale address:  " + (ts ?? "not found (Tailscale not installed or not signed in)"));
         sb.AppendLine("Port:  " + cfg.Port);
-        sb.AppendLine("Passwort:  " + cfg.Password);
+        sb.AppendLine("Password:  " + cfg.Password);
         sb.AppendLine();
-        sb.AppendLine("MAC-Adresse für Wake-on-LAN:");
+        sb.AppendLine("Away from home use the Tailscale address,");
+        sb.AppendLine("on your own Wi-Fi the home network address.");
+        sb.AppendLine();
+        sb.AppendLine("MAC address for Wake-on-LAN:");
         foreach (var (kind, name, mac) in GetMacs())
             sb.AppendLine($"   {kind}:  {mac}   ({name})");
         sb.AppendLine();
-        sb.AppendLine("Nimm die MAC-Adresse vom LAN-Adapter – Wake-on-LAN");
-        sb.AppendLine("funktioniert praktisch nur per Netzwerkkabel.");
+        sb.AppendLine("Use the MAC of the wired adapter - Wake-on-LAN");
+        sb.AppendLine("hardly ever works over Wi-Fi.");
         sb.AppendLine();
-        sb.AppendLine("Tipp: Strg+C kopiert den Text dieses Fensters.");
-        MessageBox.Show(sb.ToString(), "Space Remote – Verbindungsdaten", MessageBoxButtons.OK, MessageBoxIcon.Information);
+        sb.AppendLine("Tip: Ctrl+C copies the text of this window.");
+        MessageBox.Show(sb.ToString(), "Space Remote - connection details", MessageBoxButtons.OK, MessageBoxIcon.Information);
     }
+
+    /// <summary>Tailscale hands out addresses from 100.64.0.0/10 (the CGNAT range).</summary>
+    static string GetTailscaleIp() =>
+        NetworkInterface.GetAllNetworkInterfaces()
+            .Where(n => n.OperationalStatus == OperationalStatus.Up)
+            .SelectMany(n => n.GetIPProperties().UnicastAddresses)
+            .Select(a => a.Address)
+            .Where(a => a.AddressFamily == AddressFamily.InterNetwork)
+            .Select(a => a.GetAddressBytes())
+            .Where(b => b[0] == 100 && b[1] >= 64 && b[1] <= 127)
+            .Select(b => $"{b[0]}.{b[1]}.{b[2]}.{b[3]}")
+            .FirstOrDefault();
 
     static IEnumerable<string> GetIPv4() =>
         NetworkInterface.GetAllNetworkInterfaces()
@@ -96,7 +123,7 @@ sealed class TrayContext : ApplicationContext
 
     static IEnumerable<(string kind, string name, string mac)> GetMacs()
     {
-        string[] virtualHints = { "virtual", "hyper-v", "vmware", "virtualbox", "bluetooth", "tap-", "wan miniport", "vpn", "loopback" };
+        string[] virtualHints = { "virtual", "hyper-v", "vmware", "virtualbox", "bluetooth", "tap-", "wan miniport", "vpn", "loopback", "tailscale" };
         foreach (var n in NetworkInterface.GetAllNetworkInterfaces())
         {
             bool wired = n.NetworkInterfaceType == NetworkInterfaceType.Ethernet;
@@ -106,7 +133,7 @@ sealed class TrayContext : ApplicationContext
             if (virtualHints.Any(h => desc.Contains(h))) continue;
             byte[] bytes = n.GetPhysicalAddress().GetAddressBytes();
             if (bytes.Length != 6) continue;
-            yield return (wired ? "LAN-Kabel" : "WLAN", n.Description, string.Join(":", bytes.Select(b => b.ToString("X2"))));
+            yield return (wired ? "Wired" : "Wi-Fi", n.Description, string.Join(":", bytes.Select(b => b.ToString("X2"))));
         }
     }
 
@@ -124,7 +151,7 @@ sealed class TrayContext : ApplicationContext
         }
         catch (Exception ex)
         {
-            MessageBox.Show("Firewall-Regel wurde nicht erstellt: " + ex.Message, "Space Remote");
+            MessageBox.Show("Firewall rule was not created: " + ex.Message, "Space Remote");
         }
     }
 

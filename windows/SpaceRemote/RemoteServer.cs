@@ -7,18 +7,18 @@ using System.Text;
 namespace SpaceRemote;
 
 /*
- * Protokoll (TCP, Big Endian):
- *  Server -> Client:  "SPRM" | Version (1 Byte) | Nonce (16 Byte)
- *  Client -> Server:  HMAC-SHA256(Passwort, Nonce) (32 Byte)
- *  Server -> Client:  1 = OK, 0 = falsches Passwort
- *  danach Server -> Client: [int32 Länge][JPEG]   (Länge 0 = Keepalive)
- *  danach Client -> Server: [Typ][Daten]
+ * Protocol (TCP, big endian):
+ *  Server -> client:  "SPRM" | version (1 byte) | nonce (16 bytes)
+ *  Client -> server:  HMAC-SHA256(password, nonce) (32 bytes)
+ *  Server -> client:  1 = ok, 0 = wrong password
+ *  then server -> client: [int32 length][JPEG]   (length 0 = keepalive)
+ *  then client -> server: [type][data]
  *     1 Move    float x, float y (0..1)
  *     2 Button  byte button (0 L, 1 R, 2 M), byte down
- *     3 Scroll  int32 delta (120 = eine Raste)
- *     4 Text    uint16 Länge, UTF-8
- *     5 Key     byte mods (1 Strg, 2 Alt, 4 Shift, 8 Win), uint16 VK
- *     6 Power   byte (0 Aus, 1 Neustart, 2 Energiesparen, 3 Sperren)
+ *     3 Scroll  int32 delta (120 = one notch)
+ *     4 Text    uint16 length, UTF-8
+ *     5 Key     byte mods (1 Ctrl, 2 Alt, 4 Shift, 8 Win), uint16 VK
+ *     6 Power   byte (0 shut down, 1 restart, 2 sleep, 3 lock)
  */
 sealed class RemoteServer
 {
@@ -29,7 +29,7 @@ sealed class RemoteServer
     Session current;
 
     public event Action<string> StatusChanged;
-    public string Status { get; private set; } = "Wartet auf Verbindung";
+    public string Status { get; private set; } = "Waiting for a connection";
 
     public RemoteServer(Config cfg) => this.cfg = cfg;
 
@@ -92,9 +92,9 @@ sealed class RemoteServer
             byte[] expected = HMACSHA256.HashData(Encoding.UTF8.GetBytes(cfg.Password), nonce);
             if (!CryptographicOperations.FixedTimeEquals(answer, expected))
             {
-                Thread.Sleep(1500); // bremst Passwort-Raten
+                Thread.Sleep(1500); // slows down password guessing
                 stream.WriteByte(0);
-                SetStatus("Falsches Passwort von " + remote);
+                SetStatus("Wrong password from " + remote);
                 return;
             }
 
@@ -104,10 +104,10 @@ sealed class RemoteServer
             session = new Session(client, stream, cfg);
             lock (gate)
             {
-                current?.Close(); // immer nur ein Handy gleichzeitig
+                current?.Close(); // only one phone at a time
                 current = session;
             }
-            SetStatus("Verbunden mit " + remote);
+            SetStatus("Connected to " + remote);
             session.Run();
         }
         catch { }
@@ -123,7 +123,7 @@ sealed class RemoteServer
                     wasCurrent = true;
                 }
             }
-            if (wasCurrent) SetStatus("Wartet auf Verbindung");
+            if (wasCurrent) SetStatus("Waiting for a connection");
         }
     }
 }
@@ -168,7 +168,7 @@ sealed class Session
             long t0 = Environment.TickCount64;
             byte[] jpeg = null;
             try { jpeg = capture.CaptureJpeg(cfg.MaxWidth, cfg.JpegQuality); }
-            catch { /* z. B. Sperrbildschirm / UAC -> kein Bild möglich */ }
+            catch { /* lock screen or UAC prompt -> no capture possible */ }
 
             try
             {
@@ -239,7 +239,7 @@ sealed class Session
                     Power.Do(buf[0]);
                     break;
                 default:
-                    return; // unbekanntes Paket -> Verbindung beenden
+                    return; // unknown packet -> drop the connection
             }
         }
     }

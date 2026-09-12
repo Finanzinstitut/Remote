@@ -25,6 +25,11 @@ class Prefs(context: Context) {
         get() = sp.getString("broadcast", "") ?: ""
         set(v) = sp.edit().putString("broadcast", v.trim()).apply()
 
+    /** Optional URL called before connecting, e.g. to switch on a smart plug. */
+    var wakeUrl: String
+        get() = sp.getString("wakeUrl", "") ?: ""
+        set(v) = sp.edit().putString("wakeUrl", v.trim()).apply()
+
     val isConfigured: Boolean
         get() = host.isNotBlank() && password.isNotBlank()
 }

@@ -4,7 +4,7 @@ using System.Runtime.InteropServices;
 
 namespace SpaceRemote;
 
-/// <summary>Nimmt den Hauptbildschirm inkl. Mauszeiger auf und liefert ein JPEG.</summary>
+/// <summary>Captures the primary screen including the cursor and returns a JPEG.</summary>
 sealed class ScreenCapture : IDisposable
 {
     readonly ImageCodecInfo jpegCodec =
@@ -53,7 +53,7 @@ sealed class ScreenCapture : IDisposable
         return ms.ToArray();
     }
 
-    // ---- Mauszeiger einzeichnen ----
+    // ---- draw the mouse cursor ----
     [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
     [StructLayout(LayoutKind.Sequential)] struct CURSORINFO { public int cbSize; public int flags; public IntPtr hCursor; public POINT ptScreenPos; }
     [StructLayout(LayoutKind.Sequential)] struct ICONINFO { public bool fIcon; public int xHotspot; public int yHotspot; public IntPtr hbmMask; public IntPtr hbmColor; }

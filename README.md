@@ -1,77 +1,103 @@
 # Space Remote
 
-Knopf am Handy drücken → PC fährt per **Wake-on-LAN** hoch → sobald Windows läuft, siehst du den PC-Bildschirm auf dem Handy und steuerst ihn per Touch.
+Press one button on your phone, your PC powers on, and as soon as Windows is up you see its screen and control it by touch.
 
-| Teil | Technik | Ordner |
+| Part | Tech | Folder |
 |---|---|---|
-| Windows-App (Tray) | C# / .NET 8, WinForms, SendInput, GDI-Capture | `windows/SpaceRemote` |
-| Android-App | Kotlin, Jetpack Compose | `android` |
-| Build | GitHub Actions (kein lokales Setup nötig) | `.github/workflows/build.yml` |
+| Windows app (tray) | C# / .NET 8, WinForms, SendInput, GDI capture | `windows/SpaceRemote` |
+| Android app | Kotlin, Jetpack Compose | `android` |
+| Build | GitHub Actions, no local setup needed | `.github/workflows/build.yml` |
 
-## Bauen
+## Building
 
-Einfach in ein GitHub-Repo pushen. Unter **Actions → Build → Artifacts** liegen danach:
+Push this to a GitHub repo. Under **Actions → Build → Artifacts** you get:
 
-- `SpaceRemote-Windows` → `SpaceRemote.exe` (eine Datei, .NET muss nicht installiert sein)
+- `SpaceRemote-Windows` → `SpaceRemote.exe` (single file, no .NET install required)
 - `SpaceRemote-Android` → `SpaceRemote.apk`
 
-Mit einem Tag wie `v1.0.0` wird zusätzlich automatisch ein GitHub-Release mit beiden Dateien erstellt.
+Push a tag like `v1.0.0` and a GitHub release with both files is created automatically.
 
-## Einrichtung am PC (einmalig)
+## Setting up the PC (once)
 
-1. `SpaceRemote.exe` an einen festen Ort legen (z. B. `C:\Tools\SpaceRemote\`) und starten.
-   SmartScreen meldet sich, weil die Datei nicht signiert ist → „Weitere Informationen“ → „Trotzdem ausführen“.
-2. Beim ersten Start erscheinen **IP, Port, Passwort und MAC-Adresse**. Später jederzeit: Rechtsklick aufs Tray-Symbol → „Verbindungsdaten anzeigen“.
-3. **Firewall:** Den Windows-Dialog mit „Zugriff zulassen“ (private Netzwerke) bestätigen, oder im Tray-Menü „Firewall freigeben (Admin)“ wählen.
-   Dein Heimnetz muss unter *Einstellungen → Netzwerk → Eigenschaften* auf **Privat** stehen.
-4. **Autostart** ist automatisch aktiv („Mit Windows starten“ im Tray-Menü).
+1. Put `SpaceRemote.exe` somewhere permanent (e.g. `C:\Tools\SpaceRemote\`) and run it.
+   SmartScreen will complain because the file isn't signed → "More info" → "Run anyway".
+2. On first launch it shows your **address, port, password and MAC address**. Later: right-click the tray icon → "Show connection details".
+3. **Firewall:** accept the Windows prompt for private networks, or use "Allow through firewall (admin)" in the tray menu.
+   Your home network must be set to **Private** under Settings → Network → Properties.
+4. **Autostart** is enabled automatically ("Start with Windows" in the tray menu).
 
-### Wake-on-LAN aktivieren
+### Auto sign-in, so you get a picture right away
 
-Ohne diese Schritte kann das Handy den PC nicht einschalten – das ist Hardware/BIOS, keine App-Sache:
+Space Remote only starts once you're signed in to Windows. To get the screen without typing a password first:
 
-- **BIOS/UEFI:** „Wake on LAN“, „Power On by PCI-E“ oder „Resume by LAN“ aktivieren. „ErP“ / „Deep Sleep“ deaktivieren.
-- **Geräte-Manager → Netzwerkadapter (Ethernet) → Eigenschaften**
-  - *Energieverwaltung:* „Gerät kann den Computer aus dem Ruhezustand aktivieren“ + „Nur Magic Packet …“
-  - *Erweitert:* „Wake on Magic Packet“ = Aktiviert, „Shutdown Wake-On-LAN“ = Aktiviert (falls vorhanden), „Energieeffizientes Ethernet / Green Ethernet“ = Deaktiviert
-- **Schnellstart aus:** Systemsteuerung → Energieoptionen → „Auswählen, was beim Drücken des Netzschalters geschehen soll“ → „Schnellstart aktivieren“ abhaken.
-- **LAN-Kabel** angeschlossen lassen. Über WLAN funktioniert Wake-on-LAN fast nie.
-- **Laptops:** Netzteil dranlassen. Viele Laptops lassen sich nur aus dem *Energiesparmodus* wecken, nicht aus dem ausgeschalteten Zustand. Dann in der App über ⏻ → „Energiesparen“ statt „Herunterfahren“ verwenden.
+1. `Win + R` → `netplwiz` → untick "Users must enter a user name and password" → confirm your password.
+2. If the tickbox is missing: Settings → Accounts → Sign-in options → turn off "For improved security, only allow Windows Hello sign-in" and reopen `netplwiz`.
 
-### Damit sofort ein Bild kommt: automatische Anmeldung
+Note that anyone who powers the machine on can then use it.
 
-Space Remote startet erst, wenn du in Windows angemeldet bist. Damit nach dem Hochfahren ohne Passworteingabe direkt das Bild erscheint:
+## Using it away from home
 
-1. `Win + R` → `netplwiz` → Haken bei „Benutzer müssen Benutzernamen und Kennwort eingeben“ entfernen → Kennwort bestätigen.
-2. Fehlt der Haken: *Einstellungen → Konten → Anmeldeoptionen* → „Für mehr Sicherheit nur die Windows Hello-Anmeldung zulassen“ ausschalten und `netplwiz` erneut öffnen.
+You need **Tailscale**, a free VPN that works without port forwarding and without touching your router.
 
-Achtung: Dann kann jeder, der den PC einschaltet, ihn benutzen.
+1. Install it on the PC from `tailscale.com/download` and sign in (a Google or GitHub login is enough).
+2. Install the **Tailscale** app on your phone and sign in with the **same account**.
+3. In the Windows app: tray → "Show connection details" → it now lists a **Tailscale address** starting with `100.`
+4. Enter that address in Space Remote as the PC address. Port and password stay the same.
+5. Tailscale has to be active on the phone when you connect.
 
-## Einrichtung am Handy
+The Tailscale address also works on your own Wi-Fi, so you can leave it set permanently.
 
-1. `SpaceRemote.apk` installieren (Installation aus unbekannten Quellen erlauben).
-2. IP-Adresse, Port, Passwort und die **MAC-Adresse des LAN-Adapters** eintragen.
-3. Das Handy muss im **selben WLAN** sein wie der PC.
+### Powering on from outside
 
-Tipp: Im Router dem PC eine feste IP geben (FRITZ!Box: *Heimnetz → Netzwerk → Gerät bearbeiten → „Immer die gleiche IPv4-Adresse zuweisen“*).
+Wake-on-LAN only works inside the same network — a broadcast never reaches your home network from outside, and when the PC is off there's no Tailscale running on it either.
 
-## Bedienung
+**Desktop PCs:** use a smart plug.
 
-| Geste | Aktion |
+1. Plug the PC into the smart plug.
+2. In the BIOS set **"Restore on AC Power Loss"** / "AC Back Function" to **Power On**, so the machine starts as soon as it gets power.
+3. Switch the plug on from its own app, then tap "Start PC" in Space Remote.
+
+With **Shelly** or **Tasmota** you can do it straight from Space Remote: put the switch URL in the **Wake URL** field and the app calls it before connecting.
+
+- Shelly Plus/Pro: `http://<plug-ip>/relay/0?turn=on`
+- Tasmota: `http://<plug-ip>/cm?cmnd=Power%20On`
+
+Always shut the PC down through ⏻ in the app before switching the plug off, otherwise you're cutting power mid-run.
+
+**Laptops:** a smart plug won't help, because a laptop has a battery and won't boot just because power arrives. Laptops also rarely support Wake-on-LAN from a full shutdown. Leave it running instead:
+
+1. Keep it plugged into the charger.
+2. Settings → System → Power: set "Make my device sleep after" to **Never** while plugged in.
+3. Control Panel → Power Options → "Choose what closing the lid does" → **Do nothing** while plugged in. Now you can close it and it keeps running.
+4. Enable **"Keep PC awake"** in the tray menu. That overrides sleep and screen lock for as long as Space Remote runs.
+
+Idle draw is roughly 10-15 W. Don't leave it closed in a bag or under a blanket, it still needs airflow.
+
+## Setting up the phone
+
+1. Install `SpaceRemote.apk` (you'll need to allow installs from unknown sources).
+2. Enter the address, port, password and — for Wake-on-LAN — the **MAC address of the wired adapter**.
+3. On your home network the phone has to be on the **same Wi-Fi** as the PC. For anywhere else, see the Tailscale section above.
+
+Tip: give the PC a fixed IP in your router so the address never changes.
+
+## Controls
+
+| Gesture | Action |
 |---|---|
-| Tippen | Linksklick |
-| Zweimal tippen | Doppelklick |
-| Lange drücken | Rechtsklick |
-| Ziehen | Maus gedrückt ziehen (Fenster verschieben, markieren) |
-| Zwei Finger hoch/runter | Scrollen |
-| ⌨ | Handy-Tastatur ein/aus |
-| Fn | Sondertasten (Esc, Win, Alt+Tab, Strg+C/V, Pfeile …) |
-| ⏻ | Herunterfahren, Neustart, Energiesparen, Sperren |
-| ✕ | Verbindung trennen |
+| Tap | Left click |
+| Double tap | Double click |
+| Long press | Right click |
+| Drag | Drag with the button held (move windows, select) |
+| Two fingers up/down | Scroll |
+| ⌨ | Show/hide the phone keyboard |
+| Fn | Special keys (Esc, Win, Alt+Tab, Ctrl+C/V, arrows …) |
+| ⏻ | Shut down, restart, sleep, lock |
+| ✕ | Disconnect |
 
-## Feinabstimmung
+## Tuning
 
-`%AppData%\SpaceRemote\config.json` (Tray → „Einstellungsordner öffnen“), danach Space Remote neu starten:
+`%AppData%\SpaceRemote\config.json` (tray → "Open settings folder"), then restart Space Remote:
 
 ```json
 {
@@ -83,25 +109,26 @@ Tipp: Im Router dem PC eine feste IP geben (FRITZ!Box: *Heimnetz → Netzwerk �
 }
 ```
 
-Ruckelt es: `MaxWidth` auf 960 oder `JpegQuality` auf 45. Zu unscharf: `MaxWidth` 1600–1920.
+Choppy? Drop `MaxWidth` to 960 or `JpegQuality` to 45. Too blurry? Raise `MaxWidth` to 1600-1920. Over mobile data the lower settings are worth it.
 
-## Fehlerbehebung
+## Troubleshooting
 
-- **„Falsches Passwort“** – exakt das Passwort aus „Verbindungsdaten anzeigen“ eintragen.
-- **Wartet ewig, PC geht nicht an** – Wake-on-LAN-Schritte oben prüfen; MAC-Adresse vom *LAN*-Adapter verwenden, nicht WLAN.
-- **PC ist an, aber keine Verbindung** – Firewall/Netzwerkprofil „Privat“ prüfen; läuft das Tray-Symbol?
-- **„Kein Bild – PC gesperrt?“** – Sperrbildschirm und UAC-Dialoge kann eine normale App nicht aufnehmen.
-- **Klicks in Admin-Fenstern (z. B. Task-Manager) wirken nicht** – Windows blockiert das; Space Remote dafür „Als Administrator ausführen“.
-- **Schwarzes Bild bei Spielen im exklusiven Vollbild** – Spiel auf „Randloses Fenster“ stellen.
+- **"Wrong password"** — copy it exactly from "Show connection details".
+- **Waits forever, PC never powers on** — check the Wake-on-LAN steps; use the MAC of the *wired* adapter, not Wi-Fi.
+- **PC is on but won't connect** — check the firewall and that the network profile is Private. Is the tray icon running?
+- **"No image — PC locked?"** — a normal app can't capture the lock screen or UAC prompts.
+- **Clicks don't land in admin windows (e.g. Task Manager)** — Windows blocks that; run Space Remote as administrator.
+- **Black screen in exclusive-fullscreen games** — switch the game to borderless windowed.
 
-## Einschränkungen
+## Limits
 
-- Nur im Heimnetz. Von unterwegs geht es nur per VPN (z. B. Tailscale) und einem Gerät im Heimnetz, das das Wake-on-LAN-Paket sendet.
-- Nur der Hauptmonitor, kein Ton.
+- Primary monitor only, no audio.
 
-## Sicherheit
+## Security
 
-Das Passwort wird nie im Klartext übertragen (HMAC-SHA256 Challenge-Response), das **Bild aber unverschlüsselt**. Deshalb: nur im eigenen Netz nutzen und den Port **niemals** im Router freigeben.
+The password never goes over the wire in the clear (HMAC-SHA256 challenge-response), but the **image stream is unencrypted**. That's fine on your own Wi-Fi, and over Tailscale the whole connection is encrypted on top.
+
+Never forward the port in your router. An open port gets found by automated scanners within hours, and then a stranger is watching your screen. That's exactly why Tailscale is the right answer here: there's no open port, only your own signed-in devices get through.
 
 ---
 Finanzinstitut

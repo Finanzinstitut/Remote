@@ -8,12 +8,14 @@ public class Config
 {
     public int Port { get; set; } = 47800;
     public string Password { get; set; } = "";
-    /// <summary>Maximale Breite des gestreamten Bildes (kleiner = flüssiger).</summary>
+    /// <summary>Maximum width of the streamed image (smaller = smoother).</summary>
     public int MaxWidth { get; set; } = 1280;
-    /// <summary>JPEG-Qualität 1–100.</summary>
+    /// <summary>JPEG quality, 1-100.</summary>
     public int JpegQuality { get; set; } = 60;
     public int Fps { get; set; } = 25;
     public bool FirstRunDone { get; set; }
+    /// <summary>Keep the machine awake while Space Remote runs.</summary>
+    public bool KeepAwake { get; set; }
 
     public static string Dir =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "SpaceRemote");
@@ -28,7 +30,7 @@ public class Config
             if (File.Exists(FilePath))
                 cfg = JsonSerializer.Deserialize<Config>(File.ReadAllText(FilePath));
         }
-        catch { /* kaputte Datei -> neu anlegen */ }
+        catch { /* broken file -> start fresh */ }
 
         cfg ??= new Config();
         cfg.JpegQuality = Math.Clamp(cfg.JpegQuality, 10, 100);
@@ -48,7 +50,7 @@ public class Config
 
     static string GeneratePassword()
     {
-        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // ohne 0/O/1/I
+        const string chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
         var sb = new StringBuilder();
         for (int i = 0; i < 8; i++) sb.Append(chars[RandomNumberGenerator.GetInt32(chars.Length)]);
         return sb.ToString();
