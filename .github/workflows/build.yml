@@ -32,6 +32,20 @@ jobs:
           name: SpaceRemote-Windows
           path: out/SpaceRemote.exe
 
+      - name: Publish the viewer (control this PC from another PC)
+        run: >
+          dotnet publish windows/SpaceRemoteViewer/SpaceRemoteViewer.csproj
+          -c Release -r win-x64 --self-contained true
+          -p:PublishSingleFile=true
+          -p:IncludeNativeLibrariesForSelfExtract=true
+          -p:EnableCompressionInSingleFile=true
+          -o out-viewer
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SpaceRemote-Viewer
+          path: out-viewer/SpaceRemoteViewer.exe
+
   android:
     name: Android app
     runs-on: ubuntu-latest
@@ -82,4 +96,5 @@ jobs:
         with:
           files: |
             dist/SpaceRemote-Windows/SpaceRemote.exe
+            dist/SpaceRemote-Viewer/SpaceRemoteViewer.exe
             dist/SpaceRemote-Android/SpaceRemote.apk

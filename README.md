@@ -4,7 +4,8 @@ Press one button on your phone, your PC powers on, and as soon as Windows is up 
 
 | Part | Tech | Folder |
 |---|---|---|
-| Windows app (tray) | C# / .NET 8, WinForms, SendInput, GDI capture | `windows/SpaceRemote` |
+| Windows app (tray, runs on the PC you control) | C# / .NET 8, WinForms, SendInput, GDI capture | `windows/SpaceRemote` |
+| Windows viewer (runs on the PC you control *from*) | C# / .NET 8, WinForms | `windows/SpaceRemoteViewer` |
 | Android app | Kotlin, Jetpack Compose | `android` |
 | Build | GitHub Actions, no local setup needed | `.github/workflows/build.yml` |
 
@@ -13,6 +14,7 @@ Press one button on your phone, your PC powers on, and as soon as Windows is up 
 Push this to a GitHub repo. Under **Actions → Build → Artifacts** you get:
 
 - `SpaceRemote-Windows` → `SpaceRemote.exe` (single file, no .NET install required)
+- `SpaceRemote-Viewer` → `SpaceRemoteViewer.exe` (control the PC from another PC)
 - `SpaceRemote-Android` → `SpaceRemote.apk`
 
 Push a tag like `v1.0.0` and a GitHub release with both files is created automatically.
@@ -72,6 +74,32 @@ Always shut the PC down through ⏻ in the app before switching the plug off, ot
 4. Enable **"Keep PC awake"** in the tray menu. That overrides sleep and screen lock for as long as Space Remote runs.
 
 Idle draw is roughly 10-15 W. Don't leave it closed in a bag or under a blanket, it still needs airflow.
+
+## Controlling it from another PC
+
+`SpaceRemoteViewer.exe` is the desktop counterpart of the Android app. Run it on the *other* PC, no install needed.
+
+It speaks the exact same protocol as every version of Space Remote on the host, so **nothing on the host PC has to be updated or reinstalled** for it to work.
+
+1. Start `SpaceRemoteViewer.exe` and enter the same address, port and password as on the phone. At home use the home network IP; anywhere else install Tailscale on this PC too and use the `100.x.x.x` address.
+2. Optional: MAC address and wake URL, which work exactly like on the phone.
+3. Click **Connect**. If the host is off and a MAC is set, the viewer wakes it and waits.
+
+Only one device can be connected at a time. Connecting from the viewer kicks the phone off, and vice versa.
+
+| Input | What happens |
+|---|---|
+| Mouse move, click, wheel | Passed straight through |
+| Keyboard | Passed through as real keys, including AltGr combinations on German layouts |
+| System keys **On** | Win, Alt+Tab, Ctrl+Esc and Alt+F4 go to the remote PC too |
+| System keys **Off** | Those stay on your local PC, everything else still goes remote |
+| Ctrl+Alt+Enter | Fullscreen on/off (never forwarded). In fullscreen, touch the top edge to bring back the toolbar |
+| Ctrl+Alt+Del | Always handled by your local Windows. Use Keys ▾ → Task Manager instead |
+| Keys ▾ → Type my clipboard text | Types your local clipboard on the remote PC |
+
+Your saved password is encrypted with Windows' own per-user protection (DPAPI).
+
+Known limits: holding Ctrl or Shift while clicking (for multi-select) doesn't reach the remote PC, because the host's protocol sends modifiers together with a key, not on their own.
 
 ## Setting up the phone
 
